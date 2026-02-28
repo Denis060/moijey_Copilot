@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import {
     LayoutDashboard,
     BookOpen,
@@ -62,7 +63,20 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const router = useRouter();
+    const { data: session, status } = useSession();
     const [mobileOpen, setMobileOpen] = useState(false);
+
+    useEffect(() => {
+        if (status === "loading") return;
+        if (status === "unauthenticated") { router.replace("/login"); return; }
+        if ((session?.user as any)?.role !== "admin") router.replace("/chat");
+    }, [status, session, router]);
+
+    // Don't render anything until we've confirmed admin access
+    if (status === "loading" || (session?.user as any)?.role !== "admin") {
+        return null;
+    }
 
     const currentPage = menuItems.find(i => i.href === pathname)?.name || "Dashboard";
 

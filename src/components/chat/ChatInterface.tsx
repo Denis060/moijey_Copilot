@@ -337,6 +337,7 @@ export default function ChatInterface() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+    const [micError, setMicError] = useState<string | null>(null);
     const recognitionRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const savedSectionRef = useRef<HTMLDivElement | null>(null);
@@ -544,22 +545,41 @@ export default function ChatInterface() {
             setIsRecording(false);
             return;
         }
+        setMicError(null);
         const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        const recognition = new SR();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = "en-US";
-        recognition.onresult = (e: any) => {
-            const transcript = Array.from(e.results as any[])
-                .map((r: any) => r[0].transcript)
-                .join("");
-            setQuery(transcript);
-        };
-        recognition.onend = () => setIsRecording(false);
-        recognition.onerror = () => setIsRecording(false);
-        recognitionRef.current = recognition;
-        recognition.start();
-        setIsRecording(true);
+        if (!SR) {
+            setMicError("Voice input not supported in this browser. Try Chrome or Edge.");
+            return;
+        }
+        try {
+            const recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = "en-US";
+            recognition.onresult = (e: any) => {
+                const transcript = Array.from(e.results as any[])
+                    .map((r: any) => r[0].transcript)
+                    .join("");
+                setQuery(transcript);
+            };
+            recognition.onend = () => setIsRecording(false);
+            recognition.onerror = (e: any) => {
+                setIsRecording(false);
+                const msgs: Record<string, string> = {
+                    "not-allowed": "Microphone access denied — please allow microphone in your browser settings.",
+                    "audio-capture": "No microphone found. Please connect a microphone and try again.",
+                    "network": "Network error — voice recognition requires an internet connection.",
+                    "service-not-allowed": "Voice recognition blocked — make sure you're on HTTPS.",
+                    "no-speech": "No speech detected. Please try again.",
+                };
+                setMicError(msgs[e.error] || `Voice error: ${e.error}`);
+            };
+            recognitionRef.current = recognition;
+            recognition.start();
+            setIsRecording(true);
+        } catch (err: any) {
+            setMicError(err.message || "Failed to start voice recording.");
+        }
     };
 
     const handleDeleteSaved = async (id: string) => {
@@ -745,7 +765,7 @@ export default function ChatInterface() {
                 {/* Input */}
                 <div className="p-3 lg:p-8 border-t border-border bg-background/80 backdrop-blur-md shrink-0">
                     <form onSubmit={handleSend} className="max-w-4xl mx-auto relative">
-                        <textarea rows={1} value={query} onChange={e => setQuery(e.target.value)}
+                        <textarea rows={1} value={query} onChange={e => { setQuery(e.target.value); if (micError) setMicError(null); }}
                             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                             placeholder={isRecording ? "Listening..." : "Query the MOIJEY intelligence base..."}
                             className={`w-full bg-surface/30 border rounded-2xl lg:rounded-3xl py-3 lg:py-4 pl-4 lg:pl-6 pr-24 lg:pr-28 focus:outline-none transition-all resize-none text-sm placeholder:text-muted/50 ${isRecording ? "border-red-400/50 placeholder:text-red-400/60" : "border-border/50 focus:border-accent/50"}`}
@@ -776,7 +796,13 @@ export default function ChatInterface() {
                                 Recording — speak now, then click stop or the send button
                             </p>
                         )}
-                        {!isRecording && (
+                        {micError && !isRecording && (
+                            <p className="text-[10px] text-red-400 text-center mt-2 flex items-center justify-center gap-1.5">
+                                <MicOff className="w-3 h-3 shrink-0" />
+                                {micError}
+                            </p>
+                        )}
+                        {!isRecording && !micError && (
                             <p className="text-[9px] lg:text-[10px] text-center text-muted mt-2 uppercase tracking-tighter hidden sm:flex items-center justify-center gap-2">
                                 <Info className="w-3 h-3" />
                                 Always verify pricing with the MOIJEY ERP before quoting.
