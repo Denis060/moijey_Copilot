@@ -12,8 +12,8 @@ export const CHUNK_CONFIG = {
 };
 
 export const AI_CONFIG = {
-  EMBEDDING_MODEL: process.env.EMBEDDING_MODEL_ID || "text-embedding-3-small",
-  COMPLETION_MODEL: process.env.COMPLETION_MODEL_ID || "gpt-4o",
+  EMBEDDING_MODEL: process.env.EMBEDDING_MODEL_ID || "gemini-embedding-001",
+  COMPLETION_MODEL: process.env.COMPLETION_MODEL_ID || "gemini-2.5-flash",
 };
 
 export const UI_COLORS = {

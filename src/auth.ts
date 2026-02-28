@@ -1,9 +1,11 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import db from "@/lib/db/db-client";
+import { db } from "@/lib/db/db-client";
+import { authConfig } from "./auth.config";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+    ...authConfig,
     providers: [
         Credentials({
             name: "Credentials",
@@ -17,6 +19,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 }
 
                 const { email, password } = credentials;
+
+                // Restrict login to company email domain
+                if (!String(email).toLowerCase().endsWith("@moijeydiamonds.com")) {
+                    return null;
+                }
 
                 try {
                     // Fetch user and role
@@ -52,23 +59,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             },
         }),
     ],
-    callbacks: {
-        async jwt({ token, user }) {
-            if (user) {
-                token.role = user.role;
-                token.workspace_id = user.workspace_id;
-            }
-            return token;
-        },
-        async session({ session, token }) {
-            if (token && session.user) {
-                session.user.role = token.role as string;
-                session.user.workspace_id = token.workspace_id as string;
-            }
-            return session;
-        },
-    },
-    pages: {
-        signIn: "/login",
-    },
 });

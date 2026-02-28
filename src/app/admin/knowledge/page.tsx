@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Upload, FileText, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search } from "lucide-react";
+import { FileText, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search, RotateCcw } from "lucide-react";
 import AdminLayout from "@/components/dashboard/AdminLayout";
 
 export default function KnowledgePage() {
     const [docs, setDocs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [search, setSearch] = useState("");
+    const [retrying, setRetrying] = useState<string | null>(null);
 
     useEffect(() => {
         fetchDocs();
@@ -32,22 +34,79 @@ export default function KnowledgePage() {
 
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.[0]) return;
-        setUploading(true);
-
         const file = e.target.files[0];
+        setUploading(true);
+        console.log("HandleUpload started for:", file.name);
+
         const formData = new FormData();
         formData.append("file", file);
 
         try {
-            await fetch("/api/knowledge/upload", {
+            const res = await fetch("/api/knowledge/upload", {
                 method: "POST",
                 body: formData,
             });
+
+            const result = await res.json();
+
+            if (!res.ok) {
+                throw new Error(result.error || "Upload failed");
+            }
+
+            console.log("Upload matched success:", result);
+            alert("Document uploaded successfully! It is now being processed in the background.");
             fetchDocs();
-        } catch (err) {
-            console.error(err);
+        } catch (err: any) {
+            console.error("Upload error:", err);
+            alert(`Error uploading document: ${err.message}`);
         } finally {
             setUploading(false);
+            // Reset input
+            if (e.target) e.target.value = "";
+        }
+    };
+
+    const filteredDocs = docs.filter(d =>
+        d.title.toLowerCase().includes(search.toLowerCase()) ||
+        d.category.toLowerCase().includes(search.toLowerCase())
+    );
+
+    const handleReprocess = async (id: string) => {
+        setRetrying(id);
+        try {
+            const res = await fetch(`/api/knowledge/${id}/reprocess`, { method: "POST" });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Reprocess failed");
+            }
+            fetchDocs();
+        } catch (err: any) {
+            alert(`Error: ${err.message}`);
+        } finally {
+            setRetrying(null);
+        }
+    };
+
+    const handleDelete = async (id: string, title: string) => {
+        if (!confirm(`Are you sure you want to delete "${title}"? This will remove all associated knowledge.`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/knowledge/${id}`, {
+                method: "DELETE",
+            });
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Failed to delete");
+            }
+
+            alert("Document deleted successfully.");
+            fetchDocs();
+        } catch (err: any) {
+            console.error("Delete error:", err);
+            alert(`Error deleting document: ${err.message}`);
         }
     };
 
@@ -55,32 +114,40 @@ export default function KnowledgePage() {
         <AdminLayout>
             <div className="space-y-8 animate-in fade-in duration-500">
                 {/* Actions Bar */}
-                <div className="flex justify-between items-center bg-surface/20 border border-border/50 p-6 rounded-3xl backdrop-blur-sm">
-                    <div className="relative w-96">
+                <div className="flex flex-col sm:flex-row gap-4 sm:items-center bg-surface/20 border border-border/50 p-4 sm:p-6 rounded-3xl backdrop-blur-sm">
+                    <div className="relative flex-1 sm:max-w-sm">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                         <input
                             type="text"
                             placeholder="Search documents..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
                             className="w-full bg-background border border-border/50 rounded-2xl py-3 pl-12 pr-4 focus:outline-none focus:border-accent/50 transition-all text-sm"
                         />
                     </div>
-                    <label className="cursor-pointer px-6 py-3 bg-accent text-background font-bold rounded-2xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
-                        <Plus className="w-5 h-5" />
-                        New Document
+                    <label className={`cursor-pointer px-6 py-3 bg-accent text-background font-bold rounded-2xl hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2 shrink-0 ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        {uploading ? (
+                            <Clock className="w-5 h-5 animate-spin" />
+                        ) : (
+                            <Plus className="w-5 h-5" />
+                        )}
+                        {uploading ? "Uploading..." : "New Document"}
                         <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
                     </label>
                 </div>
 
                 {/* Status Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <StatusCard title="Total Knowledge" value={docs.length} icon={<FileText />} color="text-accent" />
                     <StatusCard title="Processing" value={docs.filter(d => d.status === 'processing').length} icon={<Clock />} color="text-blue-400" />
                     <StatusCard title="Ready" value={docs.filter(d => d.status === 'completed').length} icon={<CheckCircle2 />} color="text-green-400" />
+                    <StatusCard title="Pending / Failed" value={docs.filter(d => d.status === 'pending' || d.status === 'failed').length} icon={<AlertCircle />} color="text-yellow-400" />
                 </div>
 
                 {/* Document Table */}
                 <div className="border border-border/50 rounded-3xl bg-surface/10 overflow-hidden">
-                    <table className="w-full text-left">
+                    <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-left">
                         <thead className="bg-surface/30 border-b border-border/50">
                             <tr>
                                 <th className="px-8 py-5 text-xs font-semibold uppercase tracking-widest text-muted">Title</th>
@@ -93,10 +160,10 @@ export default function KnowledgePage() {
                         <tbody className="divide-y divide-border/30">
                             {loading ? (
                                 <tr><td colSpan={5} className="px-8 py-12 text-center text-muted">Loading intelligence base...</td></tr>
-                            ) : docs.length === 0 ? (
-                                <tr><td colSpan={5} className="px-8 py-12 text-center text-muted">No documents found. Start by uploading a file.</td></tr>
+                            ) : filteredDocs.length === 0 ? (
+                                <tr><td colSpan={5} className="px-8 py-12 text-center text-muted">{search ? "No documents match your search." : "No documents found. Start by uploading a file."}</td></tr>
                             ) : (
-                                docs.map((doc) => (
+                                filteredDocs.map((doc) => (
                                     <tr key={doc.id} className="hover:bg-accent/5 transition-colors group">
                                         <td className="px-8 py-5">
                                             <div className="flex items-center gap-3">
@@ -112,15 +179,32 @@ export default function KnowledgePage() {
                                             {new Date(doc.created_at).toLocaleDateString()}
                                         </td>
                                         <td className="px-8 py-5 text-right">
-                                            <button className="p-2 hover:bg-red-500/10 hover:text-red-400 rounded-xl transition-all opacity-0 group-hover:opacity-100">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex items-center justify-end gap-1">
+                                                {(doc.status === 'pending' || doc.status === 'failed') && (
+                                                    <button
+                                                        onClick={() => handleReprocess(doc.id)}
+                                                        disabled={retrying === doc.id}
+                                                        className="p-2 hover:bg-accent/10 hover:text-accent rounded-xl transition-all"
+                                                        title="Retry ingestion"
+                                                    >
+                                                        <RotateCcw className={`w-4 h-4 ${retrying === doc.id ? 'animate-spin' : ''}`} />
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleDelete(doc.id, doc.title)}
+                                                    className="p-2 hover:bg-red-500/10 hover:text-red-400 rounded-xl transition-all"
+                                                    title="Delete document"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
                             )}
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
         </AdminLayout>

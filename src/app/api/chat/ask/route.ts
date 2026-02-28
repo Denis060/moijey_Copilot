@@ -1,69 +1,95 @@
 import { auth } from "@/auth";
-import { NextResponse } from "next/server";
 import { db } from "@/lib/db/db-client";
 import { ragService } from "@/lib/ai/rag-service";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function POST(req: Request) {
     const session = await auth();
-
     if (!session) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    }
+
+    const { allowed, retryAfterMs } = checkRateLimit(session.user.id);
+    if (!allowed) {
+        return new Response(
+            JSON.stringify({ error: "Too many requests. Please wait a moment before asking again." }),
+            { status: 429, headers: { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) } }
+        );
     }
 
     try {
         const { query, mode, conversationId } = await req.json();
+        if (!query) return new Response(JSON.stringify({ error: "Query is required" }), { status: 400 });
 
-        if (!query) {
-            return NextResponse.json({ error: "Query is required" }, { status: 400 });
-        }
+        const userId = session.user.id;
+        const workspaceId = (session.user as any).workspace_id;
 
-        const { answer, citations, latency_ms, model } = await ragService.getAnswer(
-            query,
-            session.user.workspace_id,
-            mode || "short"
-        );
+        // 1. RAG retrieval + conversation creation in parallel (saves ~50ms)
+        const [ragResult, convId] = await Promise.all([
+            ragService.getAnswerStream(query, workspaceId, mode || "short"),
+            conversationId
+                ? Promise.resolve(conversationId as string)
+                : db.query(
+                    "INSERT INTO conversations (user_id, workspace_id, title) VALUES ($1, $2, $3) RETURNING id",
+                    [userId, workspaceId, query.substring(0, 60)]
+                  ).then(r => r.rows[0].id as string),
+        ]);
 
-        // 1. Create or verify conversation
-        let currentConvId = conversationId;
-        if (!currentConvId) {
-            const convRes = await db.query(
-                "INSERT INTO conversations (user_id, workspace_id, title) VALUES ($1, $2, $3) RETURNING id",
-                [session.user.id, session.user.workspace_id, query.substring(0, 50)]
-            );
-            currentConvId = convRes.rows[0].id;
-        }
+        const { citations, tokenStream, model } = ragResult;
 
-        // 2. Save Messages
+        // 2. Save user message (before we start streaming)
         await db.query(
             "INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', $2)",
-            [currentConvId, query]
+            [convId, query]
         );
 
-        await db.query(
-            "INSERT INTO messages (conversation_id, role, content, citations, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5)",
-            [currentConvId, answer, JSON.stringify(citations), latency_ms, model]
-        );
+        // 3. Stream tokens to client via SSE
+        const encoder = new TextEncoder();
+        const ev = (data: object) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
+        const startTime = Date.now();
 
-        // 3. Log Audit (selective for core questions)
-        await db.query(
-            "INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)",
-            [
-                session.user.workspace_id,
-                session.user.id,
-                "ASK_QUESTION",
-                "conversation",
-                currentConvId,
-                JSON.stringify({ query_length: query.length, citations_count: citations.length })
-            ]
-        );
+        const stream = new ReadableStream({
+            async start(controller) {
+                // Send metadata first so client knows convId + citations immediately
+                controller.enqueue(ev({ type: "meta", conversationId: convId, citations }));
 
-        return NextResponse.json({
-            answer,
-            citations,
-            conversationId: currentConvId
+                let fullAnswer = "";
+                try {
+                    for await (const token of tokenStream) {
+                        fullAnswer += token;
+                        controller.enqueue(ev({ type: "token", text: token }));
+                    }
+                } catch (err: any) {
+                    controller.enqueue(ev({ type: "error", message: err.message }));
+                }
+
+                const latency = Date.now() - startTime;
+
+                // Save assistant message + audit log after stream completes
+                await db.query(
+                    "INSERT INTO messages (conversation_id, role, content, citations, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5)",
+                    [convId, fullAnswer, JSON.stringify(citations), latency, model]
+                );
+                db.query(
+                    "INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)",
+                    [workspaceId, userId, "ASK_QUESTION", "conversation", convId,
+                     JSON.stringify({ query_length: query.length, citations_count: citations.length, latency_ms: latency })]
+                ).catch((err: Error) => console.error("Audit log failed:", err.message));
+
+                controller.enqueue(ev({ type: "done" }));
+                controller.close();
+            }
+        });
+
+        return new Response(stream, {
+            headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         });
     } catch (error: any) {
         console.error("Chat Error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
     }
 }

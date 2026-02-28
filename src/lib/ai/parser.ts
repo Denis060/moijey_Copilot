@@ -7,8 +7,17 @@ export const documentParser = {
     async parseToText(buffer: Buffer, mimeType: string): Promise<string> {
         switch (mimeType) {
             case "application/pdf":
-                const pdf = (await import("pdf-parse")) as any;
-                const pdfData = await (pdf.default || pdf)(buffer);
+                const { PDFParse } = await import("pdf-parse");
+                const path = await import("path");
+                const { pathToFileURL } = await import("url");
+
+                // Set worker to an absolute local file URL for robustness in Node environments
+                const workerPath = path.resolve("node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs");
+                PDFParse.setWorker(pathToFileURL(workerPath).href);
+
+                const parser = new PDFParse({ data: buffer as any });
+                const pdfData = await parser.getText();
+                await parser.destroy();
                 return pdfData.text;
 
             case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":

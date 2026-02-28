@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Shield, Lock, Mail, ChevronRight, Loader2 } from "lucide-react";
+import { Shield, Lock, Mail, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -13,10 +13,18 @@ export default function LoginPage() {
     const [error, setError] = useState("");
     const router = useRouter();
 
+    const isDomainValid = !email || email.toLowerCase().endsWith("@moijeydiamonds.com");
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
         setError("");
+
+        if (!email.toLowerCase().endsWith("@moijeydiamonds.com")) {
+            setError("Only @moijeydiamonds.com email addresses are permitted.");
+            return;
+        }
+
+        setLoading(true);
 
         try {
             const result = await signIn("credentials", {
@@ -26,7 +34,7 @@ export default function LoginPage() {
             });
 
             if (result?.error) {
-                setError("Invalid credentials. Please try again.");
+                setError("Invalid email or password. Please try again.");
             } else {
                 router.push("/chat");
             }
@@ -63,9 +71,13 @@ export default function LoginPage() {
                                     type="email"
                                     required
                                     value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="name@moijey.com"
-                                    className="w-full bg-background/50 border border-border/50 rounded-2xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent/50 transition-all"
+                                    onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                                    placeholder="name@moijeydiamonds.com"
+                                    className={`w-full bg-background/50 border rounded-2xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 transition-all ${
+                                        !isDomainValid
+                                            ? "border-red-500/50 focus:ring-red-500/20 focus:border-red-500/60"
+                                            : "border-border/50 focus:ring-accent/20 focus:border-accent/50"
+                                    }`}
                                 />
                             </div>
                         </div>
@@ -86,8 +98,9 @@ export default function LoginPage() {
                         </div>
 
                         {error && (
-                            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center">
-                                {error}
+                            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-start gap-2">
+                                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                <span>{error}</span>
                             </div>
                         )}
 

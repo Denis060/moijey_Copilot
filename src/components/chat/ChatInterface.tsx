@@ -8,13 +8,25 @@ import {
     Sparkles,
     BookOpen,
     ChevronRight,
-    MessageSquare,
+    ChevronLeft,
     Bookmark,
+    BookmarkCheck,
     History,
     Zap,
-    Info
+    Info,
+    Plus,
+    LogOut,
+    MessageSquare,
+    Trash2,
+    X,
+    Menu,
+    Pencil,
+    Mic,
+    MicOff,
+    Check,
 } from "lucide-react";
 import Link from "next/link";
+import { useSession, signOut } from "next-auth/react";
 
 interface Message {
     role: "user" | "assistant";
@@ -22,18 +34,373 @@ interface Message {
     citations?: { title: string; document_id: string }[];
 }
 
+interface Conversation {
+    id: string;
+    title: string;
+    created_at: string;
+    last_message_at: string | null;
+    message_count: number;
+}
+
+interface SavedResponse {
+    id: string;
+    title: string;
+    content: string;
+    citations: { title: string; document_id: string }[];
+    created_at: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function relativeTime(dateStr: string | null): string {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    const diffMs = Date.now() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60_000);
+    const diffHr = Math.floor(diffMs / 3_600_000);
+    const diffDay = Math.floor(diffMs / 86_400_000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHr < 24) return `${diffHr}h ago`;
+    if (diffDay === 1) return "yesterday";
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function groupConversations(convs: Conversation[]): { label: string; items: Conversation[] }[] {
+    const startOfToday = new Date().setHours(0, 0, 0, 0);
+    const startOfYesterday = startOfToday - 86_400_000;
+    const startOf7Days = startOfToday - 6 * 86_400_000;
+    const groups: Record<string, Conversation[]> = { Today: [], Yesterday: [], "Last 7 Days": [], Earlier: [] };
+    for (const c of convs) {
+        const t = new Date(c.last_message_at ?? c.created_at).getTime();
+        if (t >= startOfToday) groups["Today"].push(c);
+        else if (t >= startOfYesterday) groups["Yesterday"].push(c);
+        else if (t >= startOf7Days) groups["Last 7 Days"].push(c);
+        else groups["Earlier"].push(c);
+    }
+    return Object.entries(groups).filter(([, i]) => i.length > 0).map(([label, items]) => ({ label, items }));
+}
+
+// ── Rename inline input ───────────────────────────────────────────────────────
+
+function RenameInput({ defaultValue, onCommit, onCancel }: {
+    defaultValue: string;
+    onCommit: (val: string) => void;
+    onCancel: () => void;
+}) {
+    const ref = useRef<HTMLInputElement>(null);
+    useEffect(() => { ref.current?.select(); }, []);
+
+    const commit = () => {
+        const val = ref.current?.value.trim();
+        if (val) onCommit(val);
+        else onCancel();
+    };
+
+    return (
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+            <input
+                ref={ref}
+                defaultValue={defaultValue}
+                onKeyDown={e => {
+                    if (e.key === "Enter") { e.preventDefault(); commit(); }
+                    if (e.key === "Escape") onCancel();
+                }}
+                className="flex-1 min-w-0 bg-background border border-accent/40 rounded-lg px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-accent"
+                autoFocus
+            />
+            <button onClick={commit} className="p-0.5 text-accent hover:text-accent/80 shrink-0">
+                <Check className="w-3 h-3" />
+            </button>
+            <button onClick={onCancel} className="p-0.5 text-muted hover:text-foreground shrink-0">
+                <X className="w-3 h-3" />
+            </button>
+        </div>
+    );
+}
+
+// ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
+
+function SidebarContent({
+    grouped, loadingConversations, conversationId, savedResponses, expandedSaved,
+    onLoadConversation, onNewConversation, onDeleteSaved, onExpandSaved, onClose, isAdmin, savedSectionRef,
+    renamingId, onStartRename, onCommitRename, onCancelRename,
+}: {
+    grouped: { label: string; items: Conversation[] }[];
+    loadingConversations: boolean;
+    conversationId: string | null;
+    savedResponses: SavedResponse[];
+    expandedSaved: string | null;
+    onLoadConversation: (c: Conversation) => void;
+    onNewConversation: () => void;
+    onDeleteSaved: (id: string) => void;
+    onExpandSaved: (id: string) => void;
+    onClose: () => void;
+    isAdmin: boolean;
+    savedSectionRef?: React.RefObject<HTMLDivElement | null>;
+    renamingId: string | null;
+    onStartRename: (id: string, currentTitle: string) => void;
+    onCommitRename: (id: string, newTitle: string) => void;
+    onCancelRename: () => void;
+}) {
+    return (
+        <>
+            {/* Header */}
+            <div className="px-5 py-5 flex items-center justify-between border-b border-border/40 shrink-0">
+                <Link href="/" className="flex items-center gap-2 group" onClick={onClose}>
+                    <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
+                        <span className="text-background font-bold text-xs">M</span>
+                    </div>
+                    <span className="font-serif text-xl tracking-tight text-accent">MOIJEY</span>
+                </Link>
+                <div className="flex items-center gap-1">
+                    <button onClick={onNewConversation} title="New consultation"
+                        className="p-2 rounded-xl hover:bg-accent/10 hover:text-accent text-muted transition-all">
+                        <Plus className="w-4 h-4" />
+                    </button>
+                    {/* Desktop collapse — hidden on mobile */}
+                    <button onClick={onClose} title="Collapse sidebar"
+                        className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all hidden lg:flex">
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    {/* Mobile close — hidden on desktop */}
+                    <button onClick={onClose} title="Close menu"
+                        className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all lg:hidden">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+
+                {/* Recent Consultations */}
+                <div className="py-4">
+                    <div className="px-4 mb-3">
+                        <h3 className="text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
+                            <History className="w-3 h-3" /> Recent Consultations
+                        </h3>
+                    </div>
+                    {loadingConversations ? (
+                        <div className="px-4 space-y-2">
+                            {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-2xl bg-surface/20 animate-pulse" />)}
+                        </div>
+                    ) : grouped.length === 0 ? (
+                        <div className="px-4 py-6 text-center">
+                            <MessageSquare className="w-8 h-8 text-muted/30 mx-auto mb-2" />
+                            <p className="text-xs text-muted">No consultations yet.</p>
+                            <p className="text-[10px] text-muted/60 mt-1">Ask your first question below.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4 px-3">
+                            {grouped.map(({ label, items }) => (
+                                <div key={label}>
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted/50 px-2 mb-1.5">{label}</p>
+                                    <div className="space-y-0.5">
+                                        {items.map(conv => {
+                                            const isActive = conversationId === conv.id;
+                                            const isRenaming = renamingId === conv.id;
+                                            return (
+                                                <div key={conv.id}
+                                                    className={`w-full text-left px-3 py-2.5 rounded-xl transition-all group flex flex-col gap-0.5 ${isActive ? "bg-accent/10 border border-accent/20" : "hover:bg-surface/40 border border-transparent hover:border-border/30"}`}>
+                                                    <div className="flex items-start justify-between gap-1">
+                                                        {isRenaming ? (
+                                                            <RenameInput
+                                                                defaultValue={conv.title || ""}
+                                                                onCommit={val => onCommitRename(conv.id, val)}
+                                                                onCancel={onCancelRename}
+                                                            />
+                                                        ) : (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => { onLoadConversation(conv); onClose(); }}
+                                                                    className="flex-1 text-left min-w-0"
+                                                                >
+                                                                    <span className={`text-xs font-medium truncate leading-tight block ${isActive ? "text-accent" : "text-foreground/80 group-hover:text-foreground"}`}>
+                                                                        {conv.title || "Untitled"}
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={e => { e.stopPropagation(); onStartRename(conv.id, conv.title || ""); }}
+                                                                    className="p-1 rounded-lg text-muted/30 hover:text-muted hover:bg-surface/60 transition-all shrink-0 opacity-0 group-hover:opacity-100"
+                                                                    title="Rename"
+                                                                >
+                                                                    <Pencil className="w-3 h-3" />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    {!isRenaming && (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] text-muted/60">{relativeTime(conv.last_message_at ?? conv.created_at)}</span>
+                                                            {conv.message_count > 0 && (<>
+                                                                <span className="text-muted/30 text-[10px]">·</span>
+                                                                <span className="text-[10px] text-muted/60">{conv.message_count} {conv.message_count === 1 ? "msg" : "msgs"}</span>
+                                                            </>)}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Saved Intelligence */}
+                <div ref={savedSectionRef} className="py-4 border-t border-border/40">
+                    <div className="px-4 mb-3">
+                        <h3 className="text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
+                            <Bookmark className="w-3 h-3" /> Saved Intelligence
+                            {savedResponses.length > 0 && (
+                                <span className="ml-auto bg-accent/20 text-accent text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                                    {savedResponses.length}
+                                </span>
+                            )}
+                        </h3>
+                    </div>
+                    {savedResponses.length === 0 ? (
+                        <div className="px-4 py-4 text-center">
+                            <p className="text-[10px] text-muted/60">Tap <Bookmark className="w-3 h-3 inline" /> on any AI response to save it here.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-1 px-3">
+                            {savedResponses.map(saved => (
+                                <div key={saved.id} className="rounded-xl border border-border/30 hover:border-accent/20 transition-all overflow-hidden">
+                                    <div onClick={() => onExpandSaved(saved.id)}
+                                        className="w-full text-left px-3 py-2.5 flex items-start justify-between gap-2 group cursor-pointer">
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-medium text-foreground/80 truncate group-hover:text-foreground">{saved.title}</p>
+                                            <p className="text-[10px] text-muted/60 mt-0.5">{relativeTime(saved.created_at)}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button onClick={e => { e.stopPropagation(); onDeleteSaved(saved.id); }}
+                                                className="p-1 rounded-lg hover:bg-red-500/10 hover:text-red-400 text-muted/40 transition-all" title="Remove">
+                                                <Trash2 className="w-3 h-3" />
+                                            </button>
+                                            <X className={`w-3 h-3 text-muted/40 transition-transform ${expandedSaved === saved.id ? "rotate-0" : "rotate-45"}`} />
+                                        </div>
+                                    </div>
+                                    {expandedSaved === saved.id && (
+                                        <div className="px-3 pb-3 border-t border-border/20">
+                                            <p className="text-[11px] text-foreground/70 leading-relaxed mt-2 line-clamp-6">{saved.content}</p>
+                                            {saved.citations?.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-2">
+                                                    {saved.citations.map((c, i) => (
+                                                        <span key={i} className="text-[9px] px-2 py-0.5 rounded-full bg-accent/10 text-accent/80">{c.title}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Admin link */}
+            {isAdmin && (
+                <div className="px-4 pb-4 border-t border-border/40 pt-4 shrink-0">
+                    <Link href="/admin/knowledge" onClick={onClose}
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface hover:bg-surface/80 text-xs transition-all border border-border/40">
+                        <div className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[8px] font-bold">A</div>
+                        Admin Intelligence Access
+                    </Link>
+                </div>
+            )}
+        </>
+    );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function ChatInterface() {
+    const { data: session, status } = useSession();
+    const isAdmin = (session?.user as any)?.role === "admin";
+
     const [query, setQuery] = useState("");
     const [mode, setMode] = useState<"short" | "detailed">("short");
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
+    const [conversationId, setConversationId] = useState<string | null>(null);
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [loadingConversations, setLoadingConversations] = useState(true);
+    const [savedResponses, setSavedResponses] = useState<SavedResponse[]>([]);
+    const [savingIdx, setSavingIdx] = useState<number | null>(null);
+    const [savedIdxSet, setSavedIdxSet] = useState<Set<number>>(new Set());
+    const [expandedSaved, setExpandedSaved] = useState<string | null>(null);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [isRecording, setIsRecording] = useState(false);
+    const recognitionRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const savedSectionRef = useRef<HTMLDivElement | null>(null);
+
+    const [hasSpeechSupport, setHasSpeechSupport] = useState(false);
+    useEffect(() => {
+        setHasSpeechSupport("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+    }, []);
 
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [messages, loading]);
+
+    useEffect(() => {
+        if (status !== "authenticated") return;
+        fetchConversations();
+        fetchSaved();
+    }, [status]);
+
+    async function fetchConversations() {
+        setLoadingConversations(true);
+        try {
+            const res = await fetch("/api/conversations");
+            if (!res.ok) return;
+            const data = await res.json();
+            setConversations(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error("Failed to fetch conversations:", err);
+        } finally {
+            setLoadingConversations(false);
+        }
+    }
+
+    async function fetchSaved() {
+        try {
+            const res = await fetch("/api/saved");
+            if (!res.ok) return;
+            const data = await res.json();
+            setSavedResponses(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error("Failed to fetch saved:", err);
+        }
+    }
+
+    const loadConversation = async (conv: Conversation) => {
+        try {
+            const res = await fetch(`/api/conversations/${conv.id}/messages`);
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                setMessages(data.map((m: any) => ({ role: m.role, content: m.content, citations: m.citations ?? [] })));
+                setConversationId(conv.id);
+                setSavedIdxSet(new Set());
+            }
+        } catch (err) {
+            console.error("Failed to load conversation:", err);
+        }
+    };
+
+    const startNewConversation = () => {
+        setMessages([]);
+        setConversationId(null);
+        setQuery("");
+        setSavedIdxSet(new Set());
+    };
 
     const handleSend = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
@@ -48,19 +415,159 @@ export default function ChatInterface() {
             const res = await fetch("/api/chat/ask", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: userMessage.content, mode }),
+                body: JSON.stringify({ query: userMessage.content, mode, conversationId }),
             });
-            const data = await res.json();
 
-            setMessages(prev => [...prev, {
-                role: "assistant",
-                content: data.answer,
-                citations: data.citations
-            }]);
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                setMessages(prev => [...prev, {
+                    role: "assistant",
+                    content: res.status === 429
+                        ? "You're sending messages too quickly. Please wait a moment before trying again."
+                        : ((data as any).error || "Something went wrong. Please try again."),
+                }]);
+                setLoading(false);
+                return;
+            }
+
+            // Consume SSE stream — text appears token-by-token
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let pendingCitations: { title: string; document_id: string }[] = [];
+            let firstToken = true;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+
+                for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+                    let event: any;
+                    try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                    if (event.type === "meta") {
+                        pendingCitations = event.citations ?? [];
+                        if (!conversationId && event.conversationId) {
+                            setConversationId(event.conversationId);
+                            // Optimistically add conversation to sidebar so it appears immediately
+                            const newConvId = event.conversationId;
+                            setConversations(prev => {
+                                if (prev.find(c => c.id === newConvId)) return prev;
+                                return [{
+                                    id: newConvId,
+                                    title: userMessage.content.substring(0, 60),
+                                    created_at: new Date().toISOString(),
+                                    last_message_at: new Date().toISOString(),
+                                    message_count: 1,
+                                }, ...prev];
+                            });
+                        }
+
+                    } else if (event.type === "token") {
+                        if (firstToken) {
+                            firstToken = false;
+                            setLoading(false);
+                            setMessages(prev => [...prev, { role: "assistant", content: event.text, citations: pendingCitations }]);
+                        } else {
+                            setMessages(prev => {
+                                const last = prev[prev.length - 1];
+                                if (last?.role === "assistant") {
+                                    return [...prev.slice(0, -1), { ...last, content: last.content + event.text }];
+                                }
+                                return prev;
+                            });
+                        }
+
+                    } else if (event.type === "error") {
+                        setLoading(false);
+                        setMessages(prev => [...prev, { role: "assistant", content: event.message || "An error occurred." }]);
+                    }
+                }
+            }
+
+            // Always refresh sidebar after stream completes (gets accurate message count + timestamp)
+            fetchConversations();
         } catch (err) {
             console.error(err);
+            setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Please try again." }]);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSaveResponse = async (idx: number) => {
+        const msg = messages[idx];
+        if (!msg || msg.role !== "assistant" || savingIdx === idx || savedIdxSet.has(idx)) return;
+        setSavingIdx(idx);
+        try {
+            const res = await fetch("/api/saved", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: msg.content, citations: msg.citations ?? [] }),
+            });
+            if (res.ok) {
+                setSavedIdxSet(prev => new Set(prev).add(idx));
+                await fetchSaved();
+                setSidebarOpen(true); // reveal Saved Intelligence section
+                setTimeout(() => savedSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+            }
+        } catch (err) {
+            console.error("Failed to save response:", err);
+        } finally {
+            setSavingIdx(null);
+        }
+    };
+
+    const handleCommitRename = async (id: string, newTitle: string) => {
+        setRenamingId(null);
+        try {
+            const res = await fetch(`/api/conversations/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: newTitle }),
+            });
+            if (res.ok) {
+                setConversations(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c));
+            }
+        } catch (err) {
+            console.error("Failed to rename conversation:", err);
+        }
+    };
+
+    const toggleRecording = () => {
+        if (isRecording) {
+            recognitionRef.current?.stop();
+            setIsRecording(false);
+            return;
+        }
+        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const recognition = new SR();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        recognition.onresult = (e: any) => {
+            const transcript = Array.from(e.results as any[])
+                .map((r: any) => r[0].transcript)
+                .join("");
+            setQuery(transcript);
+        };
+        recognition.onend = () => setIsRecording(false);
+        recognition.onerror = () => setIsRecording(false);
+        recognitionRef.current = recognition;
+        recognition.start();
+        setIsRecording(true);
+    };
+
+    const handleDeleteSaved = async (id: string) => {
+        try {
+            const res = await fetch(`/api/saved/${id}`, { method: "DELETE" });
+            if (res.ok) setSavedResponses(prev => prev.filter(s => s.id !== id));
+        } catch (err) {
+            console.error("Failed to delete saved:", err);
         }
     };
 
@@ -69,102 +576,105 @@ export default function ChatInterface() {
         "Ethical sourcing statement",
         "Shipping time to New York",
         "Financing options",
-        "Custom ring process"
+        "Custom ring process",
     ];
+
+    const grouped = groupConversations(conversations);
+
+    const sidebarProps = {
+        grouped, loadingConversations, conversationId, savedResponses, expandedSaved,
+        onLoadConversation: loadConversation,
+        onNewConversation: startNewConversation,
+        onDeleteSaved: handleDeleteSaved,
+        onExpandSaved: (id: string) => setExpandedSaved(prev => prev === id ? null : id),
+        onClose: () => setSidebarOpen(false),
+        isAdmin,
+        savedSectionRef,
+        renamingId,
+        onStartRename: (id: string, currentTitle: string) => { setRenamingId(id); },
+        onCommitRename: handleCommitRename,
+        onCancelRename: () => setRenamingId(null),
+    };
 
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
-            {/* Sales Sidebar */}
-            <aside className="w-80 border-r border-border bg-surface/10 backdrop-blur-xl flex flex-col hidden lg:flex">
-                <div className="p-8">
-                    <Link href="/" className="flex items-center gap-2 group">
-                        <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
-                            <span className="text-background font-bold text-xs">M</span>
-                        </div>
-                        <span className="font-serif text-xl tracking-tight text-accent">MOIJEY</span>
-                    </Link>
-                </div>
 
-                <div className="flex-1 px-4 space-y-6">
-                    <div className="space-y-4">
-                        <h3 className="px-4 text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
-                            <History className="w-3 h-3" />
-                            Recent Consultations
-                        </h3>
-                        <div className="space-y-1">
-                            {[1, 2, 3].map(i => (
-                                <button key={i} className="w-full text-left px-4 py-3 rounded-2xl text-sm text-muted hover:bg-accent/5 hover:text-accent transition-all flex items-center justify-between group">
-                                    <span className="truncate">Diamond Warranty Policy...</span>
-                                    <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100" />
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+            {/* ── Mobile backdrop ───────────────────────────────────────────── */}
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
 
-                    <div className="space-y-4">
-                        <h3 className="px-4 text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
-                            <Bookmark className="w-3 h-3" />
-                            Saved Intelligence
-                        </h3>
-                        <div className="p-4 rounded-2xl bg-surface/20 border border-border/50 text-center text-xs text-muted">
-                            No saved responses yet.
-                        </div>
-                    </div>
-                </div>
+            {/* ── Mobile drawer (fixed overlay) ────────────────────────────── */}
+            <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-surface/95 backdrop-blur-xl border-r border-border flex flex-col transition-transform duration-300 lg:hidden ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+                <SidebarContent {...sidebarProps} onNewConversation={() => { startNewConversation(); setSidebarOpen(false); }} />
+            </div>
 
-                <div className="p-6 border-t border-border mt-auto">
-                    <Link href="/admin/knowledge" className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface hover:bg-surface/80 text-xs transition-all">
-                        <SettingsIcon />
-                        Admin Intelligence Access
-                    </Link>
+            {/* ── Desktop sidebar (inline) ──────────────────────────────────── */}
+            <aside className={`border-r border-border bg-surface/10 backdrop-blur-xl flex-col hidden lg:flex transition-all duration-300 overflow-hidden ${sidebarOpen ? "w-72" : "w-0 border-r-0"}`}>
+                <div className={`flex flex-col h-full transition-all duration-300 ${sidebarOpen ? "w-72 opacity-100" : "w-0 opacity-0 pointer-events-none"}`}>
+                    <SidebarContent {...sidebarProps} onClose={() => setSidebarOpen(false)} />
                 </div>
             </aside>
 
-            {/* Main Chat Area */}
-            <main className="flex-1 flex flex-col relative px-4 lg:px-0">
+            {/* ── Main Chat ─────────────────────────────────────────────────── */}
+            <main className="flex-1 flex flex-col relative min-w-0">
+
                 {/* Header */}
-                <header className="h-20 border-b border-border flex items-center justify-between px-8 bg-background/50 backdrop-blur-md z-40">
-                    <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
-                            <Sparkles className="w-5 h-5" />
+                <header className="h-16 lg:h-20 border-b border-border flex items-center justify-between px-4 lg:px-8 bg-background/50 backdrop-blur-md z-30 shrink-0">
+                    <div className="flex items-center gap-2 lg:gap-4">
+                        {/* Mobile hamburger */}
+                        <button onClick={() => setSidebarOpen(true)} title="Open menu"
+                            className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all lg:hidden">
+                            <Menu className="w-5 h-5" />
+                        </button>
+                        {/* Desktop expand (when collapsed) */}
+                        {!sidebarOpen && (
+                            <button onClick={() => setSidebarOpen(true)} title="Open sidebar"
+                                className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all hidden lg:flex">
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        )}
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
+                            <Sparkles className="w-4 h-4 lg:w-5 lg:h-5" />
                         </div>
                         <div>
-                            <h2 className="font-serif text-lg leading-none">AI Co-Pilot</h2>
-                            <span className="text-[10px] text-green-400 font-bold uppercase tracking-tighter">Verified Logic Operational</span>
+                            <h2 className="font-serif text-base lg:text-lg leading-none">AI Co-Pilot</h2>
+                            <span className="text-[9px] lg:text-[10px] text-green-400 font-bold uppercase tracking-tighter">Verified Logic Operational</span>
                         </div>
                     </div>
-
-                    <div className="flex bg-surface rounded-full p-1 border border-border/50">
-                        <button
-                            onClick={() => setMode("short")}
-                            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}
-                        >
-                            Short
-                        </button>
-                        <button
-                            onClick={() => setMode("detailed")}
-                            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}
-                        >
-                            Detailed
+                    <div className="flex items-center gap-2 lg:gap-3">
+                        <div className="flex bg-surface rounded-full p-1 border border-border/50">
+                            <button onClick={() => setMode("short")}
+                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                Short
+                            </button>
+                            <button onClick={() => setMode("detailed")}
+                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                Detailed
+                            </button>
+                        </div>
+                        <button onClick={() => signOut({ callbackUrl: "/login" })} title="Sign out"
+                            className="p-2 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-muted transition-all">
+                            <LogOut className="w-4 h-4" />
                         </button>
                     </div>
                 </header>
 
                 {/* Messages */}
-                <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 lg:space-y-8 custom-scrollbar">
                     {messages.length === 0 && (
-                        <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-lg mx-auto">
-                            <div className="w-16 h-16 rounded-3xl bg-accent/5 flex items-center justify-center text-accent border border-accent/20">
-                                <Zap className="w-8 h-8" />
+                        <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-lg mx-auto px-2">
+                            <div className="w-14 h-14 lg:w-16 lg:h-16 rounded-3xl bg-accent/5 flex items-center justify-center text-accent border border-accent/20">
+                                <Zap className="w-7 h-7 lg:w-8 lg:h-8" />
                             </div>
-                            <h1 className="text-3xl font-serif">How can I assist <br /> your client today?</h1>
-                            <div className="grid grid-cols-2 gap-3 w-full">
+                            <h1 className="text-2xl lg:text-3xl font-serif">How can I assist <br /> your client today?</h1>
+                            <div className="grid grid-cols-2 gap-2 lg:gap-3 w-full">
                                 {quickFaqs.map(faq => (
-                                    <button
-                                        key={faq}
-                                        onClick={() => { setQuery(faq); }}
-                                        className="p-4 rounded-2xl border border-border/50 bg-surface/10 hover:border-accent/30 hover:bg-accent/5 text-[10px] text-left transition-all group"
-                                    >
+                                    <button key={faq} onClick={() => setQuery(faq)}
+                                        className="p-3 lg:p-4 rounded-2xl border border-border/50 bg-surface/10 hover:border-accent/30 hover:bg-accent/5 text-[10px] text-left transition-all group">
                                         <span className="text-muted group-hover:text-foreground">{faq}</span>
                                     </button>
                                 ))}
@@ -174,35 +684,44 @@ export default function ChatInterface() {
 
                     <AnimatePresence initial={false}>
                         {messages.map((m, idx) => (
-                            <motion.div
-                                key={idx}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className={`flex gap-4 ${m.role === 'assistant' ? 'max-w-4xl' : 'justify-end'}`}
-                            >
+                            <motion.div key={idx} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                                className={`flex gap-3 lg:gap-4 ${m.role === 'assistant' ? 'max-w-full lg:max-w-4xl' : 'justify-end'}`}>
                                 {m.role === 'assistant' && (
-                                    <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
-                                        <Sparkles className="w-4 h-4" />
+                                    <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0 mt-1">
+                                        <Sparkles className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
                                     </div>
                                 )}
-                                <div className={`space-y-4 ${m.role === 'user' ? 'max-w-md' : ''}`}>
-                                    <div className={`p-5 rounded-3xl leading-relaxed text-sm ${m.role === 'assistant' ? 'bg-surface/30 border border-border/50' : 'bg-accent text-background font-medium'}`}>
+                                <div className={`space-y-2 lg:space-y-3 min-w-0 ${m.role === 'user' ? 'max-w-[80%]' : 'flex-1'}`}>
+                                    <div className={`px-4 py-3 lg:p-5 rounded-2xl lg:rounded-3xl leading-relaxed text-sm ${m.role === 'assistant' ? 'bg-surface/30 border border-border/50' : 'bg-accent text-background font-medium'}`}>
                                         {m.content}
                                     </div>
-                                    {m.citations && m.citations.length > 0 && (
-                                        <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-left-2 duration-500">
-                                            {m.citations.map((c, i) => (
-                                                <div key={i} className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface/50 border border-border/50 text-[10px] text-muted">
-                                                    <BookOpen className="w-3 h-3 text-accent" />
-                                                    {c.title}
+                                    {m.role === 'assistant' && (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            {m.citations && m.citations.map((c, i) => (
+                                                <div key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface/50 border border-border/50 text-[10px] text-muted">
+                                                    <BookOpen className="w-3 h-3 text-accent shrink-0" />{c.title}
                                                 </div>
                                             ))}
+                                            <button
+                                                onClick={() => handleSaveResponse(idx)}
+                                                disabled={savingIdx === idx || savedIdxSet.has(idx)}
+                                                title={savedIdxSet.has(idx) ? "Bookmarked" : "Bookmark to Saved Intelligence"}
+                                                className={`ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all border ${
+                                                    savedIdxSet.has(idx)
+                                                        ? "bg-accent/10 border-accent/30 text-accent"
+                                                        : "border-border/40 text-muted hover:border-accent/30 hover:text-accent hover:bg-accent/5"
+                                                } disabled:opacity-50`}
+                                            >
+                                                {savedIdxSet.has(idx)
+                                                    ? <><BookmarkCheck className="w-3 h-3" /> Bookmarked</>
+                                                    : <><Bookmark className="w-3 h-3" /> Bookmark</>}
+                                            </button>
                                         </div>
                                     )}
                                 </div>
                                 {m.role === 'user' && (
-                                    <div className="w-8 h-8 rounded-xl bg-surface border border-border flex items-center justify-center text-muted shrink-0">
-                                        <User className="w-4 h-4" />
+                                    <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-xl bg-surface border border-border flex items-center justify-center text-muted shrink-0 mt-1">
+                                        <User className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
                                     </div>
                                 )}
                             </motion.div>
@@ -210,11 +729,11 @@ export default function ChatInterface() {
                     </AnimatePresence>
 
                     {loading && (
-                        <div className="flex gap-4">
-                            <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
-                                <Sparkles className="w-4 h-4 animate-pulse" />
+                        <div className="flex gap-3 lg:gap-4">
+                            <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0 mt-1">
+                                <Sparkles className="w-3.5 h-3.5 animate-pulse" />
                             </div>
-                            <div className="p-5 rounded-3xl bg-surface/10 border border-border/50 flex gap-2">
+                            <div className="px-4 py-3 lg:p-5 rounded-2xl lg:rounded-3xl bg-surface/10 border border-border/50 flex gap-2 items-center">
                                 <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce" />
                                 <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce [animation-delay:0.2s]" />
                                 <div className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce [animation-delay:0.4s]" />
@@ -223,40 +742,49 @@ export default function ChatInterface() {
                     )}
                 </div>
 
-                {/* Action Form */}
-                <div className="p-8 border-t border-border bg-background/80 backdrop-blur-md">
+                {/* Input */}
+                <div className="p-3 lg:p-8 border-t border-border bg-background/80 backdrop-blur-md shrink-0">
                     <form onSubmit={handleSend} className="max-w-4xl mx-auto relative">
-                        <textarea
-                            rows={1}
-                            value={query}
-                            onChange={e => setQuery(e.target.value)}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSend();
-                                }
-                            }}
-                            placeholder="Query the MOIJEY intelligence base..."
-                            className="w-full bg-surface/30 border border-border/50 rounded-3xl py-4 pl-6 pr-16 focus:outline-none focus:border-accent/50 transition-all resize-none text-sm placeholder:text-muted/50"
+                        <textarea rows={1} value={query} onChange={e => setQuery(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                            placeholder={isRecording ? "Listening..." : "Query the MOIJEY intelligence base..."}
+                            className={`w-full bg-surface/30 border rounded-2xl lg:rounded-3xl py-3 lg:py-4 pl-4 lg:pl-6 pr-24 lg:pr-28 focus:outline-none transition-all resize-none text-sm placeholder:text-muted/50 ${isRecording ? "border-red-400/50 placeholder:text-red-400/60" : "border-border/50 focus:border-accent/50"}`}
                         />
-                        <button
-                            type="submit"
-                            disabled={!query.trim() || loading}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
-                        >
-                            <Send className="w-5 h-5" />
+                        {/* Mic button */}
+                        {hasSpeechSupport && (
+                            <button
+                                type="button"
+                                onClick={toggleRecording}
+                                title={isRecording ? "Stop recording" : "Speak your question"}
+                                className={`absolute right-12 lg:right-14 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl flex items-center justify-center transition-all ${
+                                    isRecording
+                                        ? "bg-red-500/10 text-red-400 animate-pulse"
+                                        : "text-muted hover:text-accent hover:bg-accent/10"
+                                }`}
+                            >
+                                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                            </button>
+                        )}
+                        {/* Send button */}
+                        <button type="submit" disabled={!query.trim() || loading}
+                            className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100">
+                            <Send className="w-4 h-4 lg:w-5 lg:h-5" />
                         </button>
-                        <p className="text-[10px] text-center text-muted mt-3 uppercase tracking-tighter flex items-center justify-center gap-2">
-                            <Info className="w-3 h-3" />
-                            Always verify pricing with the MOIJEY ERP before quoting.
-                        </p>
+                        {isRecording && (
+                            <p className="text-[10px] text-red-400 text-center mt-2 flex items-center justify-center gap-1.5 animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                                Recording — speak now, then click stop or the send button
+                            </p>
+                        )}
+                        {!isRecording && (
+                            <p className="text-[9px] lg:text-[10px] text-center text-muted mt-2 uppercase tracking-tighter hidden sm:flex items-center justify-center gap-2">
+                                <Info className="w-3 h-3" />
+                                Always verify pricing with the MOIJEY ERP before quoting.
+                            </p>
+                        )}
                     </form>
                 </div>
             </main>
         </div>
     );
-}
-
-function SettingsIcon() {
-    return <div className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[8px] font-bold">A</div>;
 }

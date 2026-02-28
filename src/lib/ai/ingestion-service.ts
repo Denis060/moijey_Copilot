@@ -1,5 +1,7 @@
 import { db } from "../db/db-client";
 import { aiService } from "./ai-service";
+import fs from "fs";
+import path from "path";
 import { CHUNK_CONFIG } from "../constants";
 import _ from "lodash";
 
@@ -33,6 +35,7 @@ export const ingestionService = {
             // 1. Mark as processing and chunk
             await db.query("UPDATE documents SET status = 'processing' WHERE id = $1", [documentId]);
             const chunks = this.chunkText(text);
+            console.log(`-> Document ${documentId}: Text length ${text.length}, generated ${chunks.length} chunks`);
 
             // 2. Set total chunks for progress tracking
             await db.query(
@@ -54,6 +57,7 @@ export const ingestionService = {
                 );
 
                 // Update progress every chunk (or every N chunks for efficiency)
+                console.log(`-> Document ${documentId}: Processed chunk ${i + 1}/${chunks.length}`);
                 await db.query(
                     "UPDATE documents SET processed_chunks = $1 WHERE id = $2",
                     [i + 1, documentId]
@@ -69,7 +73,9 @@ export const ingestionService = {
             await db.query("UPDATE documents SET status = 'completed' WHERE id = $1", [documentId]);
 
             return { success: true, chunkCount: chunks.length };
-        } catch (error) {
+        } catch (error: any) {
+            const errorLog = `[${new Date().toISOString()}] Ingestion Error for ${documentId}: ${error.message}\nStack: ${error.stack}\n\n`;
+            fs.appendFileSync(path.join(process.cwd(), "ingestion_error.log"), errorLog);
             console.error("Ingestion Error:", error);
             await db.query("UPDATE documents SET status = 'failed' WHERE id = $1", [documentId]);
             throw error;

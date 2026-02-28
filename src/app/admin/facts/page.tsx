@@ -8,6 +8,7 @@ export default function FactsPage() {
     const [facts, setFacts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [deleting, setDeleting] = useState<string | null>(null);
     const [newFact, setNewFact] = useState({ key: "", value: "", category: "General" });
 
     useEffect(() => {
@@ -23,6 +24,18 @@ export default function FactsPage() {
             console.error(err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        setDeleting(id);
+        try {
+            await fetch(`/api/knowledge/facts/${id}`, { method: "DELETE" });
+            fetchFacts();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setDeleting(null);
         }
     };
 
@@ -111,8 +124,12 @@ export default function FactsPage() {
                                                 <div className="w-2 h-2 rounded-full bg-accent" />
                                                 <span className="font-mono text-xs text-accent font-bold uppercase tracking-wider">{fact.key}</span>
                                             </div>
-                                            <button className="p-2 text-muted hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
-                                                <Trash2 className="w-4 h-4" />
+                                            <button
+                                                onClick={() => handleDelete(fact.id)}
+                                                disabled={deleting === fact.id}
+                                                className="p-2 text-muted hover:text-red-400 transition-colors disabled:opacity-50"
+                                            >
+                                                <Trash2 className={`w-4 h-4 ${deleting === fact.id ? 'animate-pulse' : ''}`} />
                                             </button>
                                         </div>
                                         <p className="text-sm text-foreground/80 leading-relaxed">{fact.value}</p>
