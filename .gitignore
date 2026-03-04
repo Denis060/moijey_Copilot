@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code
+.claude/
+
+# local debug/output files
+*.log
+models_list_full.txt
+models_output.txt
+working_models.txt

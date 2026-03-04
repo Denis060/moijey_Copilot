@@ -13,10 +13,7 @@ export default function Home() {
           <span className="font-serif text-2xl tracking-tight text-accent">MOIJEY</span>
         </div>
         <div className="flex items-center gap-6 text-sm font-medium">
-          <Link href="/login" className="hover:text-accent transition-colors">Sign In</Link>
-          <Link href="/admin/login" className="px-5 py-2 rounded-full border border-accent/20 hover:bg-accent/5 transition-all text-accent">
-            Admin Portal
-          </Link>
+          <Link href="/login" className="px-5 py-2 rounded-full border border-accent/20 hover:bg-accent/5 transition-all text-accent">Sign In</Link>
         </div>
       </nav>
 
@@ -36,7 +33,7 @@ export default function Home() {
             ensuring every interaction is backed by verified business knowledge.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
-            <Link href="/chat" className="px-8 py-4 rounded-full bg-accent text-background font-bold hover:scale-105 active:scale-95 transition-all flex items-center gap-2 group">
+            <Link href="/login" className="px-8 py-4 rounded-full bg-accent text-background font-bold hover:scale-105 active:scale-95 transition-all flex items-center gap-2 group">
               Launch Co-Pilot
               <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>

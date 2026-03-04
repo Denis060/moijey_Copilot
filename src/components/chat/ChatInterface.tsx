@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
     Send,
     User,
@@ -24,6 +26,7 @@ import {
     Mic,
     MicOff,
     Check,
+    CornerDownRight,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -32,6 +35,7 @@ interface Message {
     role: "user" | "assistant";
     content: string;
     citations?: { title: string; document_id: string }[];
+    suggestions?: string[];
 }
 
 interface Conversation {
@@ -120,11 +124,57 @@ function RenameInput({ defaultValue, onCommit, onCancel }: {
     );
 }
 
+// ── Content parser — splits answer text from SUGGESTIONS footer ───────────────
+
+function parseContent(content: string): { text: string; suggestions: string[] } {
+    const marker = "\nSUGGESTIONS:";
+    const idx = content.indexOf(marker);
+    if (idx === -1) return { text: content, suggestions: [] };
+    const text = content.slice(0, idx);
+    try {
+        const suggestions = JSON.parse(content.slice(idx + marker.length).trim());
+        if (Array.isArray(suggestions)) return { text, suggestions };
+    } catch { }
+    return { text, suggestions: [] };
+}
+
+// ── Markdown renderer styled for dark luxury theme ────────────────────────────
+
+function MarkdownContent({ content }: { content: string }) {
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+                h1: ({ children }) => <h1 className="text-lg font-serif font-semibold mb-2 mt-3 first:mt-0">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-base font-serif font-semibold mb-2 mt-3 first:mt-0">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-semibold mb-1.5 mt-2 first:mt-0">{children}</h3>,
+                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5">{children}</ol>,
+                li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+                strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                em: ({ children }) => <em className="italic">{children}</em>,
+                code: ({ children, className }) => {
+                    const isBlock = className?.includes("language-");
+                    return isBlock
+                        ? <code className="block bg-surface/60 border border-border/40 rounded-lg p-3 text-xs font-mono overflow-x-auto my-2">{children}</code>
+                        : <code className="bg-surface/60 border border-border/30 rounded px-1.5 py-0.5 text-xs font-mono">{children}</code>;
+                },
+                blockquote: ({ children }) => <blockquote className="border-l-2 border-accent/40 pl-3 text-muted italic my-2">{children}</blockquote>,
+                hr: () => <hr className="border-border/40 my-3" />,
+                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline hover:text-accent/80">{children}</a>,
+            }}
+        >
+            {content}
+        </ReactMarkdown>
+    );
+}
+
 // ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
 
 function SidebarContent({
     grouped, loadingConversations, conversationId, savedResponses, expandedSaved,
-    onLoadConversation, onNewConversation, onDeleteSaved, onExpandSaved, onClose, isAdmin, savedSectionRef,
+    onLoadConversation, onNewConversation, onDeleteSaved, onExpandSaved, onClose, isAdmin, isManager, savedSectionRef,
     renamingId, onStartRename, onCommitRename, onCancelRename,
 }: {
     grouped: { label: string; items: Conversation[] }[];
@@ -138,6 +188,7 @@ function SidebarContent({
     onExpandSaved: (id: string) => void;
     onClose: () => void;
     isAdmin: boolean;
+    isManager: boolean;
     savedSectionRef?: React.RefObject<HTMLDivElement | null>;
     renamingId: string | null;
     onStartRename: (id: string, currentTitle: string) => void;
@@ -303,13 +354,20 @@ function SidebarContent({
                 </div>
             </div>
 
-            {/* Admin link */}
-            {isAdmin && (
-                <div className="px-4 pb-4 border-t border-border/40 pt-4 shrink-0">
-                    <Link href="/admin/knowledge" onClick={onClose}
+            {/* Admin / Manager links */}
+            {(isAdmin || isManager) && (
+                <div className="px-4 pb-4 border-t border-border/40 pt-4 shrink-0 space-y-2">
+                    {isAdmin && (
+                        <Link href="/admin/knowledge" onClick={onClose}
+                            className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface hover:bg-surface/80 text-xs transition-all border border-border/40">
+                            <div className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[8px] font-bold">A</div>
+                            Admin Intelligence Access
+                        </Link>
+                    )}
+                    <Link href="/manager" onClick={onClose}
                         className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface hover:bg-surface/80 text-xs transition-all border border-border/40">
-                        <div className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[8px] font-bold">A</div>
-                        Admin Intelligence Access
+                        <div className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[8px] font-bold">M</div>
+                        Manager Dashboard
                     </Link>
                 </div>
             )}
@@ -321,7 +379,9 @@ function SidebarContent({
 
 export default function ChatInterface() {
     const { data: session, status } = useSession();
-    const isAdmin = (session?.user as any)?.role === "admin";
+    const role = (session?.user as any)?.role;
+    const isAdmin = role === "admin";
+    const isManager = role === "manager";
 
     const [query, setQuery] = useState("");
     const [mode, setMode] = useState<"short" | "detailed">("short");
@@ -403,13 +463,14 @@ export default function ChatInterface() {
         setSavedIdxSet(new Set());
     };
 
-    const handleSend = async (e?: React.FormEvent) => {
+    const handleSend = async (e?: React.FormEvent, overrideQuery?: string) => {
         if (e) e.preventDefault();
-        if (!query.trim() || loading) return;
+        const text = overrideQuery ?? query;
+        if (!text.trim() || loading) return;
 
-        const userMessage = { role: "user" as const, content: query };
+        const userMessage = { role: "user" as const, content: text };
         setMessages(prev => [...prev, userMessage]);
-        setQuery("");
+        if (!overrideQuery) setQuery("");
         setLoading(true);
 
         try {
@@ -492,6 +553,18 @@ export default function ChatInterface() {
 
             // Always refresh sidebar after stream completes (gets accurate message count + timestamp)
             fetchConversations();
+
+            // Parse suggestions out of the last assistant message now that streaming is done
+            setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && !last.suggestions) {
+                    const { text, suggestions } = parseContent(last.content);
+                    if (suggestions.length > 0) {
+                        return [...prev.slice(0, -1), { ...last, content: text, suggestions }];
+                    }
+                }
+                return prev;
+            });
         } catch (err) {
             console.error(err);
             setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Please try again." }]);
@@ -609,6 +682,7 @@ export default function ChatInterface() {
         onExpandSaved: (id: string) => setExpandedSaved(prev => prev === id ? null : id),
         onClose: () => setSidebarOpen(false),
         isAdmin,
+        isManager,
         savedSectionRef,
         renamingId,
         onStartRename: (id: string, currentTitle: string) => { setRenamingId(id); },
@@ -713,7 +787,9 @@ export default function ChatInterface() {
                                 )}
                                 <div className={`space-y-2 lg:space-y-3 min-w-0 ${m.role === 'user' ? 'max-w-[80%]' : 'flex-1'}`}>
                                     <div className={`px-4 py-3 lg:p-5 rounded-2xl lg:rounded-3xl leading-relaxed text-sm ${m.role === 'assistant' ? 'bg-surface/30 border border-border/50' : 'bg-accent text-background font-medium'}`}>
-                                        {m.content}
+                                        {m.role === 'assistant'
+                                            ? <MarkdownContent content={parseContent(m.content).text} />
+                                            : m.content}
                                     </div>
                                     {m.role === 'assistant' && (
                                         <div className="flex items-center gap-2 flex-wrap">
@@ -736,6 +812,21 @@ export default function ChatInterface() {
                                                     ? <><BookmarkCheck className="w-3 h-3" /> Bookmarked</>
                                                     : <><Bookmark className="w-3 h-3" /> Bookmark</>}
                                             </button>
+                                        </div>
+                                    )}
+                                    {m.role === 'assistant' && m.suggestions && m.suggestions.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 pt-1">
+                                            {m.suggestions.map((s, si) => (
+                                                <button
+                                                    key={si}
+                                                    onClick={() => handleSend(undefined, s)}
+                                                    disabled={loading}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/50 bg-surface/10 text-[11px] text-muted hover:border-accent/40 hover:text-accent hover:bg-accent/5 transition-all text-left disabled:opacity-40"
+                                                >
+                                                    <CornerDownRight className="w-3 h-3 shrink-0" />
+                                                    {s}
+                                                </button>
+                                            ))}
                                         </div>
                                     )}
                                 </div>

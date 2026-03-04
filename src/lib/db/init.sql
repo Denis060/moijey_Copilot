@@ -50,7 +50,7 @@ CREATE TABLE document_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536), -- Default for OpenAI text-embedding-3-small
+    embedding vector(3072), -- gemini-embedding-001 produces 3072-dim vectors
     chunk_index INTEGER,
     metadata JSONB DEFAULT '{}', -- Store page numbers, section titles, etc.
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -114,7 +114,8 @@ CREATE TABLE audit_logs (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_document_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- NOTE: ivfflat/hnsw indexes cap at 2000 dims; gemini-embedding-001 produces 3072, so no index here.
+-- Sequential scan is acceptable for small knowledge bases.
 CREATE INDEX idx_documents_workspace ON documents(workspace_id);
 CREATE INDEX idx_conversations_user ON conversations(user_id);
 CREATE INDEX idx_audit_logs_workspace ON audit_logs(workspace_id);
