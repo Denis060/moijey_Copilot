@@ -1,7 +1,5 @@
 import { db } from "../db/db-client";
 import { aiService } from "./ai-service";
-import fs from "fs";
-import path from "path";
 import { CHUNK_CONFIG } from "../constants";
 import _ from "lodash";
 
@@ -74,9 +72,7 @@ export const ingestionService = {
 
             return { success: true, chunkCount: chunks.length };
         } catch (error: any) {
-            const errorLog = `[${new Date().toISOString()}] Ingestion Error for ${documentId}: ${error.message}\nStack: ${error.stack}\n\n`;
-            fs.appendFileSync(path.join(process.cwd(), "ingestion_error.log"), errorLog);
-            console.error("Ingestion Error:", error);
+            console.error(`[Ingestion Error] Document ${documentId}:`, error.message, error.stack);
             await db.query("UPDATE documents SET status = 'failed' WHERE id = $1", [documentId]);
             throw error;
         }
