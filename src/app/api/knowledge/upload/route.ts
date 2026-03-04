@@ -4,8 +4,6 @@ import { db } from "@/lib/db/db-client";
 import { documentParser } from "@/lib/ai/parser";
 import { ingestionService } from "@/lib/ai/ingestion-service";
 import { storageService } from "@/lib/storage";
-import fs from "fs";
-import path from "path";
 
 export const maxDuration = 300; // Allow up to 5 mins for processing large files
 
@@ -63,8 +61,6 @@ export async function POST(req: Request) {
             console.log(`-> Parsing Success. Text length: ${text.length}`);
         } catch (parseError: any) {
             console.error("-> Parsing FAIL:", parseError);
-            const errorLog = `[${new Date().toISOString()}] Parsing Error for ${file.name} (${file.type}, ${file.size} bytes): ${parseError.message}\nStack: ${parseError.stack}\n\n`;
-            fs.appendFileSync(path.join(process.cwd(), "parsing_error.log"), errorLog);
             return NextResponse.json({
                 error: "Document parsing failed. The file may be corrupt or too large.",
                 details: parseError.message

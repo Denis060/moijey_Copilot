@@ -35,8 +35,15 @@ export default function KnowledgePage() {
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.[0]) return;
         const file = e.target.files[0];
+
+        // Vercel serverless body limit is 4.5MB
+        if (file.size > 4.5 * 1024 * 1024) {
+            alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum upload size is 4.5MB.`);
+            if (e.target) e.target.value = "";
+            return;
+        }
+
         setUploading(true);
-        console.log("HandleUpload started for:", file.name);
 
         const formData = new FormData();
         formData.append("file", file);
@@ -47,13 +54,17 @@ export default function KnowledgePage() {
                 body: formData,
             });
 
-            const result = await res.json();
-
-            if (!res.ok) {
-                throw new Error(result.error || "Upload failed");
+            // Vercel may return plain-text errors (e.g. 413) before the route runs
+            let result: any;
+            try {
+                result = await res.json();
+            } catch {
+                if (res.status === 413) throw new Error("File is too large for the server (max 4.5MB).");
+                throw new Error(`Upload failed with status ${res.status}`);
             }
 
-            console.log("Upload matched success:", result);
+            if (!res.ok) throw new Error(result.error || "Upload failed");
+
             alert("Document uploaded successfully! It is now being processed in the background.");
             fetchDocs();
         } catch (err: any) {
@@ -61,7 +72,6 @@ export default function KnowledgePage() {
             alert(`Error uploading document: ${err.message}`);
         } finally {
             setUploading(false);
-            // Reset input
             if (e.target) e.target.value = "";
         }
     };
