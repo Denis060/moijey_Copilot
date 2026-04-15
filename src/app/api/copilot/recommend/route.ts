@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { dbClient } from "@/lib/db/db-client";
+import { db } from "@/lib/db/db-client";
 import { copilotRecommendationService } from "@/lib/ai/copilot-recommendation-service";
 import { emailService } from "@/lib/ai/email-service";
 
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       JOIN roles r ON u.role_id = r.id
       WHERE u.email = $1
     `;
-    const userResult = await dbClient.query(userQuery, [session.user.email]);
+    const userResult = await db.query(userQuery, [session.user.email]);
 
     if (!userResult.rows[0]) {
       return Response.json({ error: "User not found" }, { status: 404 });
@@ -141,7 +141,7 @@ export async function POST(req: Request) {
     );
 
     // Log action
-    await dbClient.query(
+    await db.query(
       `INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [

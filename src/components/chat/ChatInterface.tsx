@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import RecommendationMode from "./RecommendationMode";
+import RecommendationMode from "@/components/copilot/RecommendationMode";
 
 interface Message {
     role: "user" | "assistant";
@@ -770,7 +770,7 @@ export default function ChatInterface() {
                                 </button>
                             </div>
                         )}
-                    </div>
+
                         <button onClick={() => signOut({ callbackUrl: "/login" })} title="Sign out"
                             className="p-2 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-muted transition-all">
                             <LogOut className="w-4 h-4" />
@@ -781,7 +781,7 @@ export default function ChatInterface() {
                 {/* Messages / Recommendations Content */}
                 {copilotMode === "questions" ? (
                     <>
-                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 lg:space-y-8 custom-scrollbar">
+                        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 lg:space-y-8 custom-scrollbar">
                     {messages.length === 0 && (
                         <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-lg mx-auto px-2">
                             <div className="w-14 h-14 lg:w-16 lg:h-16 rounded-3xl bg-accent/5 flex items-center justify-center text-accent border border-accent/20">

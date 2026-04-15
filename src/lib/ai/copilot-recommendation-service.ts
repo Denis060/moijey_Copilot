@@ -1,4 +1,4 @@
-import { dbClient } from "@/lib/db/db-client";
+import { db } from "@/lib/db/db-client";
 import { aiService } from "./ai-service";
 import { vectorService } from "./vector-service";
 
