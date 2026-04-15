@@ -1,8 +1,14 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || "copilot@moijeydiamonds.com";
+
+const getResendClient = () => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new Error("RESEND_API_KEY environment variable is not set");
+  }
+  return new Resend(apiKey);
+};
 
 export const emailService = {
   /**
@@ -14,6 +20,7 @@ export const emailService = {
     emailBody: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
+      const resend = getResendClient();
       const subject = `Your Personalized Jewelry Recommendations from Moijey`;
 
       const htmlBody = `
@@ -91,6 +98,7 @@ export const emailService = {
     products: any[]
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
+      const resend = getResendClient();
       const productsHtml = products
         .map(
           (p) => `

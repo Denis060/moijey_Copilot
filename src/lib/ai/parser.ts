@@ -10,9 +10,14 @@ export const documentParser = {
                 const { PDFParse } = await import("pdf-parse");
                 const { pathToFileURL } = await import("url");
 
-                // Use require.resolve so the path works in Vercel serverless (cwd is unpredictable)
-                const workerPath = require.resolve("pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs");
-                PDFParse.setWorker(pathToFileURL(workerPath).href);
+                // Try to set worker, but handle cases where it's not available (e.g., Vercel serverless)
+                try {
+                    const workerPath = require.resolve("pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs");
+                    PDFParse.setWorker(pathToFileURL(workerPath).href);
+                } catch (workerError) {
+                    // Worker path not available in this environment - continue without setting it
+                    console.warn("PDF worker path not available, parsing may be limited");
+                }
 
                 const parser = new PDFParse({ data: buffer as any });
                 const pdfData = await parser.getText();

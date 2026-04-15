@@ -1,6 +1,5 @@
 import { db } from "@/lib/db/db-client";
 import { aiService } from "./ai-service";
-import { vectorService } from "./vector-service";
 
 export interface RecommendationInput {
   customerName: string;
@@ -118,7 +117,7 @@ export const copilotRecommendationService = {
       query += ` LIMIT 20`;
     }
 
-    const result = await dbClient.query(query, params);
+    const result = await db.query(query, params);
     return result.rows;
   },
 
@@ -250,7 +249,7 @@ Format as plain text (no markdown formatting). End with a professional closing s
       sent ? new Date() : null,
     ];
 
-    const result = await dbClient.query(query, params);
+    const result = await db.query(query, params);
     return result.rows[0];
   },
 };
