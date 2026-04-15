@@ -113,9 +113,60 @@ CREATE TABLE audit_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Products inventory for recommendation engine
+CREATE TABLE products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id TEXT UNIQUE NOT NULL, -- from Excel
+    title TEXT NOT NULL,
+    category TEXT,
+    price DECIMAL(12, 2),
+    price_display TEXT,
+    in_stock BOOLEAN DEFAULT true,
+    shopify_product_id TEXT,
+    shopify_url TEXT,
+    image_url TEXT,
+    diamond_shape TEXT,
+    metal TEXT,
+    style TEXT,
+    description_short TEXT,
+    tags TEXT[], -- array of tags
+    target_gender TEXT,
+    notes_internal TEXT,
+    embedding vector(3072), -- for semantic search
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Recommendation requests for audit trail
+CREATE TABLE recommendation_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    workspace_id UUID REFERENCES workspaces(id),
+    customer_name TEXT NOT NULL,
+    customer_email TEXT NOT NULL,
+    budget_min DECIMAL(12, 2),
+    budget_max DECIMAL(12, 2),
+    product_type TEXT,
+    diamond_shape TEXT,
+    metal TEXT,
+    style TEXT,
+    timeline TEXT,
+    notes TEXT,
+    matched_products JSONB DEFAULT '[]', -- array of product IDs
+    email_draft TEXT,
+    email_sent BOOLEAN DEFAULT false,
+    sent_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 -- NOTE: ivfflat/hnsw indexes cap at 2000 dims; gemini-embedding-001 produces 3072, so no index here.
 -- Sequential scan is acceptable for small knowledge bases.
 CREATE INDEX idx_documents_workspace ON documents(workspace_id);
 CREATE INDEX idx_conversations_user ON conversations(user_id);
 CREATE INDEX idx_audit_logs_workspace ON audit_logs(workspace_id);
+CREATE INDEX idx_products_shape ON products(diamond_shape);
+CREATE INDEX idx_products_metal ON products(metal);
+CREATE INDEX idx_products_price ON products(price);
+CREATE INDEX idx_products_stock ON products(in_stock);
+CREATE INDEX idx_recommendation_user ON recommendation_requests(user_id);

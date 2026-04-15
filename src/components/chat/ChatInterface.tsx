@@ -27,9 +27,11 @@ import {
     MicOff,
     Check,
     CornerDownRight,
+    Wand2,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
+import RecommendationMode from "./RecommendationMode";
 
 interface Message {
     role: "user" | "assistant";
@@ -385,6 +387,7 @@ export default function ChatInterface() {
 
     const [query, setQuery] = useState("");
     const [mode, setMode] = useState<"short" | "detailed">("short");
+    const [copilotMode, setCopilotMode] = useState<"questions" | "recommendations">("questions");
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [conversationId, setConversationId] = useState<string | null>(null);
@@ -740,16 +743,34 @@ export default function ChatInterface() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2 lg:gap-3">
+                        {/* Copilot Mode Selector */}
                         <div className="flex bg-surface rounded-full p-1 border border-border/50">
-                            <button onClick={() => setMode("short")}
-                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
-                                Short
+                            <button onClick={() => setCopilotMode("questions")}
+                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'questions' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                <MessageSquare className="w-3 h-3" />
+                                Questions
                             </button>
-                            <button onClick={() => setMode("detailed")}
-                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
-                                Detailed
+                            <button onClick={() => setCopilotMode("recommendations")}
+                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'recommendations' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                <Wand2 className="w-3 h-3" />
+                                Recommend
                             </button>
                         </div>
+
+                        {/* Answer Mode Selector (only show for Questions mode) */}
+                        {copilotMode === "questions" && (
+                            <div className="flex bg-surface rounded-full p-1 border border-border/50">
+                                <button onClick={() => setMode("short")}
+                                    className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                    Short
+                                </button>
+                                <button onClick={() => setMode("detailed")}
+                                    className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                    Detailed
+                                </button>
+                            </div>
+                        )}
+                    </div>
                         <button onClick={() => signOut({ callbackUrl: "/login" })} title="Sign out"
                             className="p-2 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-muted transition-all">
                             <LogOut className="w-4 h-4" />
@@ -757,7 +778,9 @@ export default function ChatInterface() {
                     </div>
                 </header>
 
-                {/* Messages */}
+                {/* Messages / Recommendations Content */}
+                {copilotMode === "questions" ? (
+                    <>
                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 lg:space-y-8 custom-scrollbar">
                     {messages.length === 0 && (
                         <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-lg mx-auto px-2">
@@ -901,6 +924,10 @@ export default function ChatInterface() {
                         )}
                     </form>
                 </div>
+                    </>
+                ) : (
+                    <RecommendationMode />
+                )}
             </main>
         </div>
     );
