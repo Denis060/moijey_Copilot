@@ -55,12 +55,23 @@ async function buildRagContext(
     const lowConfidence = aboveThreshold.length === 0 && relevantChunks.length > 0;
 
     const context = relevantChunks.map(c => `[SOURCE: ${c.title}] ${c.content}`).join("\n\n");
-    const citations: Citation[] = relevantChunks.map(c => ({
-        document_id: c.document_id,
-        title: c.title,
-        content: c.content,
-        score: c.score,
-    }));
+
+    // Dedupe citations by document_id so the UI shows one badge per source document
+    // (when multiple chunks from the same PDF contribute, we keep the highest-scoring one
+    // for the modal preview). Order: best match first.
+    const byDoc = new Map<string, Citation>();
+    for (const c of relevantChunks) {
+        const existing = byDoc.get(c.document_id);
+        if (!existing || c.score > existing.score) {
+            byDoc.set(c.document_id, {
+                document_id: c.document_id,
+                title: c.title,
+                content: c.content,
+                score: c.score,
+            });
+        }
+    }
+    const citations: Citation[] = [...byDoc.values()].sort((a, b) => b.score - a.score);
 
     const historyBlock = formatHistory(history);
 
