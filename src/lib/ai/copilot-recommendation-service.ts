@@ -161,11 +161,14 @@ Write a professional summary that a sales rep would use internally. Make it conc
   },
 
   /**
-   * Generate customer-facing recommendation email
+   * Generate customer-facing recommendation email.
+   * The rep's name + title are appended programmatically so the LLM cannot
+   * decide to use "[Your Name]" or invent an unrelated job title.
    */
   async generateCustomerEmail(
     input: RecommendationInput,
-    matches: Product[]
+    matches: Product[],
+    rep: { name: string; title?: string } = { name: "Your Moijey Specialist" }
   ): Promise<string> {
     const matchesText =
       matches.length > 0
@@ -203,11 +206,16 @@ ${customOrderText}
 
 Write a professional, warm, and personalized email (4-5 sentences) recommending these products. Be enthusiastic about the selections and make a personal touch. Do NOT include the [View Product] links in the email body - just write naturally.
 
-Format as plain text (no markdown formatting). End with a professional closing signature.
+Format as plain text (no markdown formatting). End with the body of the email — DO NOT include a sign-off, signature, "Warmly", "Sincerely", "[Your Name]", or any closing line. The signature will be appended separately.
 `;
 
-    const email = await aiService.generateAnswer(prompt);
-    return email;
+    const body = await aiService.generateAnswer(prompt);
+
+    // Strip any closing the model added anyway, then append the canonical signature.
+    const closingPattern = /\n+\s*(warmly|sincerely|best regards|kind regards|regards|yours truly|yours sincerely|best,|cheers|with warm regards|with regards)\b[\s\S]*$/i;
+    const cleanedBody = body.replace(closingPattern, "").trim();
+    const title = rep.title || "Moijey Diamond Specialist";
+    return `${cleanedBody}\n\nWarmly,\n\n${rep.name}\n${title}`;
   },
 
   /**

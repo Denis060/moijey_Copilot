@@ -3,6 +3,22 @@ import { db } from "@/lib/db/db-client";
 import { copilotRecommendationService } from "@/lib/ai/copilot-recommendation-service";
 import { emailService } from "@/lib/ai/email-service";
 
+// Derive a human-friendly display name from an email's local part:
+// "jane.doe@x" → "Jane Doe", "ibrahim_fofanah@x" → "Ibrahim Fofanah",
+// "ibrahimfofanah060@x" → "Ibrahimfofanah". Strips trailing digits.
+function deriveRepName(email: string): string {
+  const local = (email.split("@")[0] || "").replace(/\d+$/, "");
+  if (!local) return "Your Moijey Specialist";
+  if (/[._-]/.test(local)) {
+    return local
+      .split(/[._-]+/)
+      .filter(Boolean)
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+      .join(" ");
+  }
+  return local.charAt(0).toUpperCase() + local.slice(1).toLowerCase();
+}
+
 export async function POST(req: Request) {
   try {
     const session = await auth();
@@ -85,7 +101,8 @@ export async function POST(req: Request) {
       matches
     );
 
-    // Generate customer email
+    // Generate customer email — sign it with the logged-in rep's derived name.
+    const repName = deriveRepName(session.user.email);
     const emailDraft = await copilotRecommendationService.generateCustomerEmail(
       {
         customerName,
@@ -99,7 +116,8 @@ export async function POST(req: Request) {
         timeline,
         notes,
       },
-      matches
+      matches,
+      { name: repName }
     );
 
     let emailSent = false;
