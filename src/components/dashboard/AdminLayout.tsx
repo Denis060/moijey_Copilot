@@ -15,6 +15,7 @@ import {
     Menu,
     X,
     Package,
+    Wand2,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -30,6 +31,7 @@ const menuItems = [
     { name: "Knowledge Base", icon: BookOpen, href: "/admin/knowledge" },
     { name: "Business Facts", icon: Database, href: "/admin/facts" },
     { name: "Products", icon: Package, href: "/admin/products" },
+    { name: "Recommendations", icon: Wand2, href: "/admin/recommendations" },
     { name: "User Management", icon: Users, href: "/admin/users" },
     { name: "Audit Logs", icon: History, href: "/admin/logs" },
 ];

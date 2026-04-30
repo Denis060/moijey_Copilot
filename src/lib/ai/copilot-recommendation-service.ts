@@ -250,6 +250,21 @@ STRICT OUTPUT RULES:
       RETURNING id;
     `;
 
+    // Store richer product data so the audit/history view can render proper cards
+    // without re-querying the products table months later (when prices/images may
+    // have changed). Stays small per row (<2KB even for 5 matches).
+    const matchedSnapshot = matches.slice(0, 5).map((m) => ({
+      id: m.id,
+      product_id: m.product_id,
+      title: m.title,
+      price: m.price,
+      image_url: m.image_url,
+      shopify_url: m.shopify_url,
+      diamond_shape: m.diamond_shape,
+      metal: m.metal,
+      style: m.style,
+    }));
+
     const params = [
       userId,
       workspaceId,
@@ -263,7 +278,7 @@ STRICT OUTPUT RULES:
       input.style || null,
       input.timeline || null,
       input.notes || null,
-      JSON.stringify(matches.map((m) => ({ id: m.id, title: m.title }))),
+      JSON.stringify(matchedSnapshot),
       emailDraft,
       sent,
       sent ? new Date() : null,
