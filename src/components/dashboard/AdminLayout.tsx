@@ -14,6 +14,7 @@ import {
     ChevronRight,
     Menu,
     X,
+    Package,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,6 +29,7 @@ const menuItems = [
     { name: "Insights", icon: LayoutDashboard, href: "/admin" },
     { name: "Knowledge Base", icon: BookOpen, href: "/admin/knowledge" },
     { name: "Business Facts", icon: Database, href: "/admin/facts" },
+    { name: "Products", icon: Package, href: "/admin/products" },
     { name: "User Management", icon: Users, href: "/admin/users" },
     { name: "Audit Logs", icon: History, href: "/admin/logs" },
 ];

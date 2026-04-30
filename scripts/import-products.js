@@ -22,6 +22,7 @@ require("dotenv").config();
 
 const dbClient = new pg.Client({
   connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 async function importProducts(csvPath) {
