@@ -32,6 +32,9 @@ import {
     Mail,
     Square,
     AlertTriangle,
+    Search,
+    Archive,
+    ArchiveRestore,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -75,6 +78,7 @@ interface Conversation {
     created_at: string;
     last_message_at: string | null;
     message_count: number;
+    archived_at?: string | null;
 }
 
 interface SavedResponse {
@@ -207,6 +211,9 @@ function SidebarContent({
     grouped, loadingConversations, conversationId, savedResponses, expandedSaved,
     onLoadConversation, onNewConversation, onDeleteSaved, onExpandSaved, onClose, isAdmin, isManager, savedSectionRef,
     renamingId, onStartRename, onCommitRename, onCancelRename,
+    conversationSearch, onConversationSearchChange,
+    showArchived, onToggleShowArchived, onArchive, archivingId,
+    totalConversations, hasSearch,
 }: {
     grouped: { label: string; items: Conversation[] }[];
     loadingConversations: boolean;
@@ -225,6 +232,14 @@ function SidebarContent({
     onStartRename: (id: string, currentTitle: string) => void;
     onCommitRename: (id: string, newTitle: string) => void;
     onCancelRename: () => void;
+    conversationSearch: string;
+    onConversationSearchChange: (val: string) => void;
+    showArchived: boolean;
+    onToggleShowArchived: () => void;
+    onArchive: (id: string, archive: boolean) => void;
+    archivingId: string | null;
+    totalConversations: number;
+    hasSearch: boolean;
 }) {
     return (
         <>
@@ -259,11 +274,37 @@ function SidebarContent({
 
                 {/* Recent Consultations */}
                 <div className="py-4">
-                    <div className="px-4 mb-3">
+                    <div className="px-4 mb-3 flex items-center justify-between gap-2">
                         <h3 className="text-[10px] font-bold text-muted uppercase tracking-widest flex items-center gap-2">
-                            <History className="w-3 h-3" /> Recent Consultations
+                            <History className="w-3 h-3" /> {showArchived ? "Archived Consultations" : "Recent Consultations"}
                         </h3>
                     </div>
+
+                    {/* Search box — only useful once you have something to search. */}
+                    {(totalConversations > 0 || hasSearch) && (
+                        <div className="px-3 mb-2">
+                            <div className="relative">
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted/50" />
+                                <input
+                                    type="text"
+                                    value={conversationSearch}
+                                    onChange={e => onConversationSearchChange(e.target.value)}
+                                    placeholder={showArchived ? "Search archived..." : "Search consultations..."}
+                                    className="w-full bg-surface/30 border border-border/40 rounded-lg pl-7 pr-7 py-1.5 text-[11px] focus:outline-none focus:border-accent/40 placeholder:text-muted/40"
+                                />
+                                {conversationSearch && (
+                                    <button
+                                        onClick={() => onConversationSearchChange("")}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted/40 hover:text-muted"
+                                        title="Clear"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {loadingConversations ? (
                         <div className="px-4 space-y-2">
                             {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-2xl bg-surface/20 animate-pulse" />)}
@@ -271,8 +312,22 @@ function SidebarContent({
                     ) : grouped.length === 0 ? (
                         <div className="px-4 py-6 text-center">
                             <MessageSquare className="w-8 h-8 text-muted/30 mx-auto mb-2" />
-                            <p className="text-xs text-muted">No consultations yet.</p>
-                            <p className="text-[10px] text-muted/60 mt-1">Ask your first question below.</p>
+                            {hasSearch ? (
+                                <>
+                                    <p className="text-xs text-muted">No matches.</p>
+                                    <p className="text-[10px] text-muted/60 mt-1">Try a different search.</p>
+                                </>
+                            ) : showArchived ? (
+                                <>
+                                    <p className="text-xs text-muted">No archived consultations.</p>
+                                    <p className="text-[10px] text-muted/60 mt-1">Archive a thread to hide it from your sidebar.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-xs text-muted">No consultations yet.</p>
+                                    <p className="text-[10px] text-muted/60 mt-1">Ask your first question below.</p>
+                                </>
+                            )}
                         </div>
                     ) : (
                         <div className="space-y-4 px-3">
@@ -283,9 +338,10 @@ function SidebarContent({
                                         {items.map(conv => {
                                             const isActive = conversationId === conv.id;
                                             const isRenaming = renamingId === conv.id;
+                                            const isArchiving = archivingId === conv.id;
                                             return (
                                                 <div key={conv.id}
-                                                    className={`w-full text-left px-3 py-2.5 rounded-xl transition-all group flex flex-col gap-0.5 ${isActive ? "bg-accent/10 border border-accent/20" : "hover:bg-surface/40 border border-transparent hover:border-border/30"}`}>
+                                                    className={`w-full text-left px-3 py-2.5 rounded-xl transition-all group flex flex-col gap-0.5 ${isActive ? "bg-accent/10 border border-accent/20" : "hover:bg-surface/40 border border-transparent hover:border-border/30"} ${isArchiving ? "opacity-50" : ""}`}>
                                                     <div className="flex items-start justify-between gap-1">
                                                         {isRenaming ? (
                                                             <RenameInput
@@ -303,13 +359,27 @@ function SidebarContent({
                                                                         {conv.title || "Untitled"}
                                                                     </span>
                                                                 </button>
-                                                                <button
-                                                                    onClick={e => { e.stopPropagation(); onStartRename(conv.id, conv.title || ""); }}
-                                                                    className="p-1 rounded-lg text-muted/30 hover:text-muted hover:bg-surface/60 transition-all shrink-0 opacity-0 group-hover:opacity-100"
-                                                                    title="Rename"
-                                                                >
-                                                                    <Pencil className="w-3 h-3" />
-                                                                </button>
+                                                                <div className="flex items-center shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                                                                    {!showArchived && (
+                                                                        <button
+                                                                            onClick={e => { e.stopPropagation(); onStartRename(conv.id, conv.title || ""); }}
+                                                                            className="p-1 rounded-lg text-muted/40 hover:text-muted hover:bg-surface/60 transition-all"
+                                                                            title="Rename"
+                                                                        >
+                                                                            <Pencil className="w-3 h-3" />
+                                                                        </button>
+                                                                    )}
+                                                                    <button
+                                                                        onClick={e => { e.stopPropagation(); onArchive(conv.id, !showArchived); }}
+                                                                        disabled={isArchiving}
+                                                                        className="p-1 rounded-lg text-muted/40 hover:text-muted hover:bg-surface/60 transition-all"
+                                                                        title={showArchived ? "Restore consultation" : "Archive consultation (hides from sidebar; admins still see it)"}
+                                                                    >
+                                                                        {showArchived
+                                                                            ? <ArchiveRestore className="w-3 h-3" />
+                                                                            : <Archive className="w-3 h-3" />}
+                                                                    </button>
+                                                                </div>
                                                             </>
                                                         )}
                                                     </div>
@@ -320,6 +390,12 @@ function SidebarContent({
                                                                 <span className="text-muted/30 text-[10px]">·</span>
                                                                 <span className="text-[10px] text-muted/60">{conv.message_count} {conv.message_count === 1 ? "msg" : "msgs"}</span>
                                                             </>)}
+                                                            {showArchived && (
+                                                                <>
+                                                                    <span className="text-muted/30 text-[10px]">·</span>
+                                                                    <span className="text-[10px] text-yellow-400/70">archived</span>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
@@ -328,6 +404,20 @@ function SidebarContent({
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* Toggle: switch between active and archived views. Hidden until the rep
+                        has at least one conversation, otherwise it's noise. */}
+                    {(totalConversations > 0 || showArchived) && (
+                        <div className="px-3 pt-3 mt-3 border-t border-border/30">
+                            <button
+                                onClick={onToggleShowArchived}
+                                className="w-full text-left px-2 py-2 rounded-lg text-[11px] text-muted hover:text-accent hover:bg-accent/5 transition-colors flex items-center gap-2"
+                            >
+                                {showArchived ? <ArchiveRestore className="w-3 h-3" /> : <Archive className="w-3 h-3" />}
+                                {showArchived ? "Back to active consultations" : "Show archived"}
+                            </button>
                         </div>
                     )}
                 </div>
@@ -432,6 +522,9 @@ export default function ChatInterface() {
     const [expandedSaved, setExpandedSaved] = useState<string | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [conversationSearch, setConversationSearch] = useState("");
+    const [showArchived, setShowArchived] = useState(false);
+    const [archivingId, setArchivingId] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [micError, setMicError] = useState<string | null>(null);
@@ -465,10 +558,18 @@ export default function ChatInterface() {
         fetchSaved();
     }, [status]);
 
+    // Refetch when the archived toggle flips so the list reflects the right view.
+    useEffect(() => {
+        if (status !== "authenticated") return;
+        fetchConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showArchived]);
+
     async function fetchConversations() {
         setLoadingConversations(true);
         try {
-            const res = await fetch("/api/conversations");
+            const url = showArchived ? "/api/conversations?archived=1" : "/api/conversations";
+            const res = await fetch(url);
             if (!res.ok) return;
             const data = await res.json();
             setConversations(Array.isArray(data) ? data : []);
@@ -718,6 +819,41 @@ export default function ChatInterface() {
         }
     };
 
+    /**
+     * Archive (or restore) a consultation. Reps can hide noisy/test threads from
+     * their sidebar; the row stays in the database with archived_at set, so admins
+     * can still see it via /admin/logs and managers can audit if needed. Audit
+     * log captures the action with user_id + conversation_id.
+     */
+    const handleArchive = async (id: string, archive: boolean) => {
+        setArchivingId(id);
+        try {
+            const res = await fetch(`/api/conversations/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ archived: archive }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error((data as any).error || `${archive ? "Archive" : "Restore"} failed`);
+            }
+            // Drop the row from whichever view we're in (active vs archived):
+            // archived items don't show in active view and vice versa.
+            setConversations(prev => prev.filter(c => c.id !== id));
+            // If the rep is currently viewing the conversation they just archived,
+            // start a fresh consultation so the chat pane isn't pointing at a hidden row.
+            if (archive && conversationId === id) {
+                setConversationId(null);
+                setMessages([]);
+            }
+        } catch (err: any) {
+            console.error("Archive failed:", err);
+            alert(err.message || "Failed to update consultation");
+        } finally {
+            setArchivingId(null);
+        }
+    };
+
     // Encode mono Float32 PCM samples as a 16-bit little-endian WAV Blob.
     // Gemini accepts audio/wav directly; this avoids browser-only webm formats.
     const encodeWAV = (samples: Float32Array, sampleRate: number): Blob => {
@@ -872,7 +1008,12 @@ export default function ChatInterface() {
         "Custom ring process",
     ];
 
-    const grouped = groupConversations(conversations);
+    // Filter by search before grouping so empty groups disappear automatically.
+    const searchTerm = conversationSearch.trim().toLowerCase();
+    const filteredConversations = searchTerm
+        ? conversations.filter(c => (c.title || "").toLowerCase().includes(searchTerm))
+        : conversations;
+    const grouped = groupConversations(filteredConversations);
 
     const sidebarProps = {
         grouped, loadingConversations, conversationId, savedResponses, expandedSaved,
@@ -885,9 +1026,17 @@ export default function ChatInterface() {
         isManager,
         savedSectionRef,
         renamingId,
-        onStartRename: (id: string, currentTitle: string) => { setRenamingId(id); },
+        onStartRename: (id: string, _currentTitle: string) => { setRenamingId(id); },
         onCommitRename: handleCommitRename,
         onCancelRename: () => setRenamingId(null),
+        conversationSearch,
+        onConversationSearchChange: setConversationSearch,
+        showArchived,
+        onToggleShowArchived: () => setShowArchived(v => !v),
+        onArchive: handleArchive,
+        archivingId,
+        totalConversations: conversations.length,
+        hasSearch: searchTerm.length > 0,
     };
 
     return (
