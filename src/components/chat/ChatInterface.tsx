@@ -28,16 +28,29 @@ import {
     Check,
     CornerDownRight,
     Wand2,
+    Copy,
+    Mail,
+    Square,
+    AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import RecommendationMode from "@/components/copilot/RecommendationMode";
 
+interface Citation {
+    title: string;
+    document_id: string;
+    content?: string;
+    score?: number;
+}
+
 interface Message {
     role: "user" | "assistant";
     content: string;
-    citations?: { title: string; document_id: string }[];
+    citations?: Citation[];
     suggestions?: string[];
+    lowConfidence?: boolean;
+    aborted?: boolean;
 }
 
 interface Conversation {
@@ -52,7 +65,7 @@ interface SavedResponse {
     id: string;
     title: string;
     content: string;
-    citations: { title: string; document_id: string }[];
+    citations: Citation[];
     created_at: string;
 }
 
@@ -390,6 +403,10 @@ export default function ChatInterface() {
     const [copilotMode, setCopilotMode] = useState<"questions" | "recommendations">("questions");
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
+    const [streaming, setStreaming] = useState(false);
+    const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+    const [expandedCitation, setExpandedCitation] = useState<{ msgIdx: number; citIdx: number } | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loadingConversations, setLoadingConversations] = useState(true);
@@ -481,18 +498,23 @@ export default function ChatInterface() {
     const handleSend = async (e?: React.FormEvent, overrideQuery?: string) => {
         if (e) e.preventDefault();
         const text = overrideQuery ?? query;
-        if (!text.trim() || loading) return;
+        if (!text.trim() || loading || streaming) return;
 
         const userMessage = { role: "user" as const, content: text };
         setMessages(prev => [...prev, userMessage]);
         if (!overrideQuery) setQuery("");
         setLoading(true);
+        setStreaming(true);
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
 
         try {
             const res = await fetch("/api/chat/ask", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ query: userMessage.content, mode, conversationId }),
+                signal: controller.signal,
             });
 
             if (!res.ok) {
@@ -504,6 +526,7 @@ export default function ChatInterface() {
                         : ((data as any).error || "Something went wrong. Please try again."),
                 }]);
                 setLoading(false);
+                setStreaming(false);
                 return;
             }
 
@@ -511,7 +534,8 @@ export default function ChatInterface() {
             const reader = res.body!.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
-            let pendingCitations: { title: string; document_id: string }[] = [];
+            let pendingCitations: Citation[] = [];
+            let pendingLowConfidence = false;
             let firstToken = true;
 
             while (true) {
@@ -528,6 +552,7 @@ export default function ChatInterface() {
 
                     if (event.type === "meta") {
                         pendingCitations = event.citations ?? [];
+                        pendingLowConfidence = !!event.lowConfidence;
                         if (!conversationId && event.conversationId) {
                             setConversationId(event.conversationId);
                             // Optimistically add conversation to sidebar so it appears immediately
@@ -548,7 +573,12 @@ export default function ChatInterface() {
                         if (firstToken) {
                             firstToken = false;
                             setLoading(false);
-                            setMessages(prev => [...prev, { role: "assistant", content: event.text, citations: pendingCitations }]);
+                            setMessages(prev => [...prev, {
+                                role: "assistant",
+                                content: event.text,
+                                citations: pendingCitations,
+                                lowConfidence: pendingLowConfidence,
+                            }]);
                         } else {
                             setMessages(prev => {
                                 const last = prev[prev.length - 1];
@@ -580,12 +610,49 @@ export default function ChatInterface() {
                 }
                 return prev;
             });
-        } catch (err) {
-            console.error(err);
-            setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Please try again." }]);
+        } catch (err: any) {
+            if (err?.name === "AbortError") {
+                // User pressed Stop — keep whatever streamed in, mark it aborted, no error toast.
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role === "assistant") {
+                        return [...prev.slice(0, -1), { ...last, aborted: true }];
+                    }
+                    return [...prev, { role: "assistant", content: "(Stopped before any response was generated.)", aborted: true }];
+                });
+                fetchConversations();
+            } else {
+                console.error(err);
+                setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Please try again." }]);
+            }
         } finally {
+            abortControllerRef.current = null;
             setLoading(false);
+            setStreaming(false);
         }
+    };
+
+    const handleStop = () => {
+        abortControllerRef.current?.abort();
+    };
+
+    const handleCopyMessage = async (idx: number, content: string) => {
+        try {
+            await navigator.clipboard.writeText(parseContent(content).text);
+            setCopiedIdx(idx);
+            setTimeout(() => setCopiedIdx(null), 1500);
+        } catch (err) {
+            console.error("Copy failed:", err);
+        }
+    };
+
+    // Open the rep's default mail client with the answer pre-filled. No server roundtrip,
+    // and the rep keeps full control over recipient + tweaks before sending.
+    const handleEmailMessage = (content: string) => {
+        const body = parseContent(content).text;
+        const subject = "From Moijey Diamonds";
+        const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = url;
     };
 
     const handleSaveResponse = async (idx: number) => {
@@ -922,25 +989,58 @@ export default function ChatInterface() {
                                     </div>
                                     {m.role === 'assistant' && (
                                         <div className="flex items-center gap-2 flex-wrap">
-                                            {m.citations && m.citations.map((c, i) => (
-                                                <div key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface/50 border border-border/50 text-[10px] text-muted">
-                                                    <BookOpen className="w-3 h-3 text-accent shrink-0" />{c.title}
+                                            {m.lowConfidence && (
+                                                <div
+                                                    title="No source passed the similarity threshold — verify before quoting"
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-[10px] text-yellow-400 font-semibold uppercase tracking-tighter"
+                                                >
+                                                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                                                    Verify before quoting
                                                 </div>
+                                            )}
+                                            {m.citations && m.citations.map((c, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => setExpandedCitation({ msgIdx: idx, citIdx: i })}
+                                                    disabled={!c.content}
+                                                    title={c.content ? "Click to view source excerpt" : c.title}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface/50 border border-border/50 text-[10px] text-muted hover:border-accent/40 hover:text-accent hover:bg-accent/5 transition-colors disabled:cursor-default disabled:hover:border-border/50 disabled:hover:text-muted disabled:hover:bg-surface/50"
+                                                >
+                                                    <BookOpen className="w-3 h-3 text-accent shrink-0" />{c.title}
+                                                </button>
                                             ))}
-                                            <button
-                                                onClick={() => handleSaveResponse(idx)}
-                                                disabled={savingIdx === idx || savedIdxSet.has(idx)}
-                                                title={savedIdxSet.has(idx) ? "Bookmarked" : "Bookmark to Saved Intelligence"}
-                                                className={`ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all border ${
-                                                    savedIdxSet.has(idx)
-                                                        ? "bg-accent/10 border-accent/30 text-accent"
-                                                        : "border-border/40 text-muted hover:border-accent/30 hover:text-accent hover:bg-accent/5"
-                                                } disabled:opacity-50`}
-                                            >
-                                                {savedIdxSet.has(idx)
-                                                    ? <><BookmarkCheck className="w-3 h-3" /> Bookmarked</>
-                                                    : <><Bookmark className="w-3 h-3" /> Bookmark</>}
-                                            </button>
+                                            <div className="ml-auto flex items-center gap-1">
+                                                <button
+                                                    onClick={() => handleCopyMessage(idx, m.content)}
+                                                    title="Copy answer"
+                                                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all border border-border/40 text-muted hover:border-accent/30 hover:text-accent hover:bg-accent/5"
+                                                >
+                                                    {copiedIdx === idx
+                                                        ? <><Check className="w-3 h-3" /> Copied</>
+                                                        : <><Copy className="w-3 h-3" /> Copy</>}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEmailMessage(m.content)}
+                                                    title="Email this answer to a client"
+                                                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all border border-border/40 text-muted hover:border-accent/30 hover:text-accent hover:bg-accent/5"
+                                                >
+                                                    <Mail className="w-3 h-3" /> Email
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSaveResponse(idx)}
+                                                    disabled={savingIdx === idx || savedIdxSet.has(idx)}
+                                                    title={savedIdxSet.has(idx) ? "Bookmarked" : "Bookmark to Saved Intelligence"}
+                                                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all border ${
+                                                        savedIdxSet.has(idx)
+                                                            ? "bg-accent/10 border-accent/30 text-accent"
+                                                            : "border-border/40 text-muted hover:border-accent/30 hover:text-accent hover:bg-accent/5"
+                                                    } disabled:opacity-50`}
+                                                >
+                                                    {savedIdxSet.has(idx)
+                                                        ? <><BookmarkCheck className="w-3 h-3" /> Bookmarked</>
+                                                        : <><Bookmark className="w-3 h-3" /> Bookmark</>}
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
                                     {m.role === 'assistant' && m.suggestions && m.suggestions.length > 0 && (
@@ -1008,11 +1108,25 @@ export default function ChatInterface() {
                                 {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                             </button>
                         )}
-                        {/* Send button */}
-                        <button type="submit" disabled={!query.trim() || loading}
-                            className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100">
-                            <Send className="w-4 h-4 lg:w-5 lg:h-5" />
-                        </button>
+                        {/* Send / Stop button — toggles to Stop while a stream is in flight */}
+                        {streaming ? (
+                            <button
+                                type="button"
+                                onClick={handleStop}
+                                title="Stop generating"
+                                className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-red-500/15 text-red-400 border border-red-500/30 flex items-center justify-center hover:bg-red-500/25 active:scale-95 transition-all"
+                            >
+                                <Square className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
+                            </button>
+                        ) : (
+                            <button
+                                type="submit"
+                                disabled={!query.trim() || loading}
+                                className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                            >
+                                <Send className="w-4 h-4 lg:w-5 lg:h-5" />
+                            </button>
+                        )}
                         {isRecording && (
                             <p className="text-[10px] text-red-400 text-center mt-2 flex items-center justify-center gap-1.5 animate-pulse">
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
@@ -1044,6 +1158,52 @@ export default function ChatInterface() {
                     <RecommendationMode />
                 )}
             </main>
+
+            {/* Citation source viewer — opens when a citation badge is clicked */}
+            {expandedCitation && (() => {
+                const msg = messages[expandedCitation.msgIdx];
+                const cit = msg?.citations?.[expandedCitation.citIdx];
+                if (!cit) return null;
+                const scorePct = typeof cit.score === "number" ? Math.round(cit.score * 100) : null;
+                return (
+                    <div
+                        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+                        onClick={() => setExpandedCitation(null)}
+                    >
+                        <div
+                            onClick={e => e.stopPropagation()}
+                            className="w-full max-w-2xl max-h-[80vh] overflow-y-auto bg-background border border-border/60 rounded-3xl shadow-2xl"
+                        >
+                            <div className="flex items-start justify-between gap-4 p-6 border-b border-border/40">
+                                <div className="flex items-start gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
+                                        <BookOpen className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] uppercase tracking-widest text-muted font-bold">Source excerpt</p>
+                                        <p className="font-serif text-lg truncate">{cit.title}</p>
+                                        {scorePct !== null && (
+                                            <p className="text-[11px] text-muted mt-0.5">
+                                                Match strength: <span className="text-foreground font-semibold">{scorePct}%</span>
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setExpandedCitation(null)}
+                                    className="p-2 rounded-xl hover:bg-surface/60 text-muted shrink-0"
+                                    title="Close"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <div className="p-6 text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                {cit.content || <span className="text-muted italic">No excerpt available for this citation.</span>}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }

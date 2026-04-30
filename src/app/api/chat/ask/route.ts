@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db/db-client";
-import { ragService } from "@/lib/ai/rag-service";
+import { ragService, loadConversationHistory } from "@/lib/ai/rag-service";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function POST(req: Request) {
@@ -24,9 +24,11 @@ export async function POST(req: Request) {
         const userId = session.user.id;
         const workspaceId = (session.user as any).workspace_id;
 
-        // 1. RAG retrieval + conversation creation in parallel (saves ~50ms)
+        // 1. Load prior turns (only if continuing an existing conversation), then run
+        //    RAG + conversation upsert in parallel.
+        const history = conversationId ? await loadConversationHistory(conversationId) : [];
         const [ragResult, convId] = await Promise.all([
-            ragService.getAnswerStream(query, workspaceId, mode || "short"),
+            ragService.getAnswerStream(query, workspaceId, mode || "short", history),
             conversationId
                 ? Promise.resolve(conversationId as string)
                 : db.query(
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
                   ).then(r => r.rows[0].id as string),
         ]);
 
-        const { citations, tokenStream, model } = ragResult;
+        const { citations, lowConfidence, tokenStream, model } = ragResult;
 
         // 2. Save user message (before we start streaming)
         await db.query(
@@ -50,8 +52,8 @@ export async function POST(req: Request) {
 
         const stream = new ReadableStream({
             async start(controller) {
-                // Send metadata first so client knows convId + citations immediately
-                controller.enqueue(ev({ type: "meta", conversationId: convId, citations }));
+                // Send metadata first so client knows convId + citations + confidence immediately
+                controller.enqueue(ev({ type: "meta", conversationId: convId, citations, lowConfidence }));
 
                 let fullAnswer = "";
                 try {
