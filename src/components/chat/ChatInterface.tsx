@@ -1147,49 +1147,54 @@ export default function ChatInterface() {
 
                 {/* Input */}
                 <div className="p-3 lg:p-8 border-t border-border bg-background/80 backdrop-blur-md shrink-0">
-                    <form onSubmit={handleSend} className="max-w-4xl mx-auto relative">
-                        <textarea rows={1} value={query} onChange={e => { setQuery(e.target.value); if (micError) setMicError(null); }}
-                            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                            placeholder={isRecording ? "Listening..." : isTranscribing ? "Transcribing..." : "Query the MOIJEY intelligence base..."}
-                            className={`w-full bg-surface/30 border rounded-2xl lg:rounded-3xl py-3 lg:py-4 pl-4 lg:pl-6 pr-24 lg:pr-28 focus:outline-none transition-all resize-none text-sm placeholder:text-muted/50 ${isRecording ? "border-red-400/50 placeholder:text-red-400/60" : "border-border/50 focus:border-accent/50"}`}
-                        />
-                        {/* Mic button */}
-                        {hasSpeechSupport && (
-                            <button
-                                type="button"
-                                onClick={toggleRecording}
-                                disabled={isTranscribing}
-                                title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing..." : "Speak your question"}
-                                className={`absolute right-12 lg:right-14 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl flex items-center justify-center transition-all disabled:cursor-wait ${
-                                    isRecording
-                                        ? "bg-red-500/10 text-red-400 animate-pulse"
-                                        : isTranscribing
-                                            ? "text-accent/60 animate-pulse"
-                                            : "text-muted hover:text-accent hover:bg-accent/10"
-                                }`}
-                            >
-                                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                            </button>
-                        )}
-                        {/* Send / Stop button — toggles to Stop while a stream is in flight */}
-                        {streaming ? (
-                            <button
-                                type="button"
-                                onClick={handleStop}
-                                title="Stop generating"
-                                className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-red-500/15 text-red-400 border border-red-500/30 flex items-center justify-center hover:bg-red-500/25 active:scale-95 transition-all"
-                            >
-                                <Square className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-                            </button>
-                        ) : (
-                            <button
-                                type="submit"
-                                disabled={!query.trim() || loading}
-                                className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
-                            >
-                                <Send className="w-4 h-4 lg:w-5 lg:h-5" />
-                            </button>
-                        )}
+                    <form onSubmit={handleSend} className="max-w-4xl mx-auto">
+                        {/* Textarea + buttons share their own relative wrapper so absolute
+                            positioning is anchored to the input row, not the whole form
+                            (which includes the helper-text line below). */}
+                        <div className="relative">
+                            <textarea rows={1} value={query} onChange={e => { setQuery(e.target.value); if (micError) setMicError(null); }}
+                                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                                placeholder={isRecording ? "Listening..." : isTranscribing ? "Transcribing..." : "Query the MOIJEY intelligence base..."}
+                                className={`w-full bg-surface/30 border rounded-2xl lg:rounded-3xl py-3 lg:py-4 pl-4 lg:pl-6 pr-24 lg:pr-28 focus:outline-none transition-all resize-none text-sm placeholder:text-muted/50 align-middle block ${isRecording ? "border-red-400/50 placeholder:text-red-400/60" : "border-border/50 focus:border-accent/50"}`}
+                            />
+                            {/* Mic button */}
+                            {hasSpeechSupport && (
+                                <button
+                                    type="button"
+                                    onClick={toggleRecording}
+                                    disabled={isTranscribing}
+                                    title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing..." : "Speak your question"}
+                                    className={`absolute right-12 lg:right-14 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl flex items-center justify-center transition-all disabled:cursor-wait ${
+                                        isRecording
+                                            ? "bg-red-500/10 text-red-400 animate-pulse"
+                                            : isTranscribing
+                                                ? "text-accent/60 animate-pulse"
+                                                : "text-muted hover:text-accent hover:bg-accent/10"
+                                    }`}
+                                >
+                                    {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                </button>
+                            )}
+                            {/* Send / Stop button — toggles to Stop while a stream is in flight */}
+                            {streaming ? (
+                                <button
+                                    type="button"
+                                    onClick={handleStop}
+                                    title="Stop generating"
+                                    className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-red-500/15 text-red-400 border border-red-500/30 flex items-center justify-center hover:bg-red-500/25 active:scale-95 transition-all"
+                                >
+                                    <Square className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
+                                </button>
+                            ) : (
+                                <button
+                                    type="submit"
+                                    disabled={!query.trim() || loading}
+                                    className="absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                                >
+                                    <Send className="w-4 h-4 lg:w-5 lg:h-5" />
+                                </button>
+                            )}
+                        </div>
                         {isRecording && (
                             <p className="text-[10px] text-red-400 text-center mt-2 flex items-center justify-center gap-1.5 animate-pulse">
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
