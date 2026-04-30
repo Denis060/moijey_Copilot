@@ -24,11 +24,15 @@ export async function POST(req: Request) {
         const userId = session.user.id;
         const workspaceId = (session.user as any).workspace_id;
 
-        // One-time idempotent migration so this route can persist the new "products" column
-        // without a separate manual schema change. Cheap on every request, only fires DDL once.
+        // One-time idempotent migrations so this route can persist new columns
+        // without a separate manual schema change. Cheap on every request — DDL fires
+        // only the first time, no-ops thereafter.
         await db.query(
             `ALTER TABLE messages ADD COLUMN IF NOT EXISTS products JSONB DEFAULT '[]'`
         ).catch(err => console.warn("messages.products schema add warn:", err.message));
+        await db.query(
+            `ALTER TABLE messages ADD COLUMN IF NOT EXISTS low_confidence BOOLEAN DEFAULT FALSE`
+        ).catch(err => console.warn("messages.low_confidence schema add warn:", err.message));
 
         // 1. Run retrieval (embedding + chunks + facts + products), history-load, and
         //    conversation upsert all in parallel. The retrieval doesn't actually need
@@ -76,10 +80,11 @@ export async function POST(req: Request) {
 
                 const latency = Date.now() - startTime;
 
-                // Save assistant message + audit log after stream completes
+                // Save assistant message + audit log after stream completes.
+                // low_confidence is persisted so we can compute the verify-rate metric on the insights page.
                 await db.query(
-                    "INSERT INTO messages (conversation_id, role, content, citations, products, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5, $6)",
-                    [convId, fullAnswer, JSON.stringify(citations), JSON.stringify(products), latency, model]
+                    "INSERT INTO messages (conversation_id, role, content, citations, products, low_confidence, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7)",
+                    [convId, fullAnswer, JSON.stringify(citations), JSON.stringify(products), lowConfidence, latency, model]
                 );
                 db.query(
                     "INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)",
