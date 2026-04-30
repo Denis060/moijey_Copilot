@@ -86,6 +86,42 @@ export const aiService = {
      * Streams a chat completion token-by-token using Gemini's streamGenerateContent SSE endpoint.
      * Yields text tokens as they arrive.
      */
+    /**
+     * Transcribes audio bytes via Gemini's multimodal generateContent endpoint.
+     * Caller passes raw bytes + mime type (e.g. "audio/wav"). Returns plain transcript text.
+     */
+    async transcribeAudio(audioBytes: Uint8Array, mimeType: string): Promise<string> {
+        const modelId = process.env.COMPLETION_MODEL_ID || "gemini-2.5-flash";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${GEMINI_API_KEY}`;
+
+        // Base64 encode the audio for inline_data
+        let binary = "";
+        for (let i = 0; i < audioBytes.length; i++) binary += String.fromCharCode(audioBytes[i]);
+        const base64 = Buffer.from(binary, "binary").toString("base64");
+
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: "Transcribe this audio verbatim. Return only the transcription with no commentary, no quotes, no labels." },
+                        { inline_data: { mime_type: mimeType, data: base64 } },
+                    ],
+                }],
+            }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            console.error("Gemini Transcribe Fetch Error:", data.error || data);
+            throw new Error(data.error?.message || "Failed to transcribe audio");
+        }
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Gemini returned an empty transcription.");
+        return text.trim();
+    },
+
     async *generateAnswerStream(prompt: string): AsyncGenerator<string> {
         const modelId = process.env.COMPLETION_MODEL_ID || "gemini-1.5-flash";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`;

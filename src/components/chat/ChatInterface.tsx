@@ -400,14 +400,26 @@ export default function ChatInterface() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const [micError, setMicError] = useState<string | null>(null);
-    const recognitionRef = useRef<any>(null);
+    const recorderRef = useRef<{
+        ctx: AudioContext;
+        source: MediaStreamAudioSourceNode;
+        node: AudioWorkletNode;
+        stream: MediaStream;
+        buffers: Float32Array[];
+        sampleRate: number;
+    } | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const savedSectionRef = useRef<HTMLDivElement | null>(null);
 
     const [hasSpeechSupport, setHasSpeechSupport] = useState(false);
     useEffect(() => {
-        setHasSpeechSupport("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+        setHasSpeechSupport(
+            typeof navigator !== "undefined" &&
+            !!navigator.mediaDevices?.getUserMedia &&
+            (typeof window !== "undefined" && (("AudioContext" in window) || ("webkitAudioContext" in window)))
+        );
     }, []);
 
     useEffect(() => {
@@ -615,46 +627,140 @@ export default function ChatInterface() {
         }
     };
 
-    const toggleRecording = () => {
-        if (isRecording) {
-            recognitionRef.current?.stop();
-            setIsRecording(false);
+    // Encode mono Float32 PCM samples as a 16-bit little-endian WAV Blob.
+    // Gemini accepts audio/wav directly; this avoids browser-only webm formats.
+    const encodeWAV = (samples: Float32Array, sampleRate: number): Blob => {
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+        const writeStr = (off: number, s: string) => {
+            for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+        };
+        writeStr(0, "RIFF");
+        view.setUint32(4, 36 + samples.length * 2, true);
+        writeStr(8, "WAVE");
+        writeStr(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);            // PCM
+        view.setUint16(22, 1, true);            // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true); // byte rate (mono * 16-bit)
+        view.setUint16(32, 2, true);            // block align
+        view.setUint16(34, 16, true);           // bits per sample
+        writeStr(36, "data");
+        view.setUint32(40, samples.length * 2, true);
+        let off = 44;
+        for (let i = 0; i < samples.length; i++) {
+            const s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+            off += 2;
+        }
+        return new Blob([buffer], { type: "audio/wav" });
+    };
+
+    const stopAndTranscribe = async () => {
+        const rec = recorderRef.current;
+        if (!rec) { setIsRecording(false); return; }
+        recorderRef.current = null;
+        setIsRecording(false);
+
+        try {
+            rec.node.port.onmessage = null;
+            rec.node.disconnect();
+            rec.source.disconnect();
+            rec.stream.getTracks().forEach(t => t.stop());
+            await rec.ctx.close();
+        } catch { /* ignore teardown errors */ }
+
+        const totalLen = rec.buffers.reduce((sum, b) => sum + b.length, 0);
+        if (totalLen === 0) {
+            setMicError("No audio captured. Please try again.");
             return;
         }
+        const merged = new Float32Array(totalLen);
+        let offset = 0;
+        for (const b of rec.buffers) { merged.set(b, offset); offset += b.length; }
+
+        const wav = encodeWAV(merged, rec.sampleRate);
+        setIsTranscribing(true);
+        try {
+            const fd = new FormData();
+            fd.append("audio", wav, "speech.wav");
+            const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Transcription failed");
+            const text = (data.text || "").trim();
+            if (!text) {
+                setMicError("Couldn't make out any speech. Please try again.");
+            } else {
+                setQuery(prev => (prev ? prev.trimEnd() + " " : "") + text);
+            }
+        } catch (err: any) {
+            setMicError(err.message || "Transcription failed.");
+        } finally {
+            setIsTranscribing(false);
+        }
+    };
+
+    const toggleRecording = async () => {
+        if (isRecording) {
+            await stopAndTranscribe();
+            return;
+        }
+        if (isTranscribing) return;
         setMicError(null);
-        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        if (!SR) {
+
+        if (!navigator.mediaDevices?.getUserMedia) {
             setMicError("Voice input not supported in this browser. Try Chrome or Edge.");
             return;
         }
+
+        let stream: MediaStream | null = null;
+        let ctx: AudioContext | null = null;
         try {
-            const recognition = new SR();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.lang = "en-US";
-            recognition.onresult = (e: any) => {
-                const transcript = Array.from(e.results as any[])
-                    .map((r: any) => r[0].transcript)
-                    .join("");
-                setQuery(transcript);
-            };
-            recognition.onend = () => setIsRecording(false);
-            recognition.onerror = (e: any) => {
-                setIsRecording(false);
-                const msgs: Record<string, string> = {
-                    "not-allowed": "Microphone access denied — please allow microphone in your browser settings.",
-                    "audio-capture": "No microphone found. Please connect a microphone and try again.",
-                    "network": "Network error — voice recognition requires an internet connection.",
-                    "service-not-allowed": "Voice recognition blocked — make sure you're on HTTPS.",
-                    "no-speech": "No speech detected. Please try again.",
-                };
-                setMicError(msgs[e.error] || `Voice error: ${e.error}`);
-            };
-            recognitionRef.current = recognition;
-            recognition.start();
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+            ctx = new Ctx() as AudioContext;
+
+            // Inline AudioWorklet processor: forwards each input quantum to the main thread.
+            // Doesn't write to outputs, so the destination receives silence (no mic feedback).
+            const workletCode = `
+                class PcmCaptureProcessor extends AudioWorkletProcessor {
+                    process(inputs) {
+                        const ch = inputs[0] && inputs[0][0];
+                        if (ch && ch.length) this.port.postMessage(ch.slice(0));
+                        return true;
+                    }
+                }
+                registerProcessor('pcm-capture', PcmCaptureProcessor);
+            `;
+            const blobUrl = URL.createObjectURL(new Blob([workletCode], { type: "application/javascript" }));
+            try {
+                await ctx.audioWorklet.addModule(blobUrl);
+            } finally {
+                URL.revokeObjectURL(blobUrl);
+            }
+
+            const source = ctx.createMediaStreamSource(stream);
+            const node = new AudioWorkletNode(ctx, "pcm-capture");
+            const buffers: Float32Array[] = [];
+            node.port.onmessage = (e: MessageEvent<Float32Array>) => buffers.push(e.data);
+            source.connect(node);
+            node.connect(ctx.destination); // required to keep the worklet running; output is silent
+
+            recorderRef.current = { ctx, source, node, stream, buffers, sampleRate: ctx.sampleRate };
             setIsRecording(true);
         } catch (err: any) {
-            setMicError(err.message || "Failed to start voice recording.");
+            // Roll back partial setup if anything failed (e.g. worklet loading)
+            stream?.getTracks().forEach(t => t.stop());
+            try { await ctx?.close(); } catch { /* ignore */ }
+            const name = err?.name;
+            if (name === "NotAllowedError" || name === "SecurityError") {
+                setMicError("Microphone access denied — please allow microphone in your browser settings.");
+            } else if (name === "NotFoundError") {
+                setMicError("No microphone found. Please connect a microphone and try again.");
+            } else {
+                setMicError(err?.message || "Failed to start voice recording.");
+            }
         }
     };
 
@@ -881,7 +987,7 @@ export default function ChatInterface() {
                     <form onSubmit={handleSend} className="max-w-4xl mx-auto relative">
                         <textarea rows={1} value={query} onChange={e => { setQuery(e.target.value); if (micError) setMicError(null); }}
                             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                            placeholder={isRecording ? "Listening..." : "Query the MOIJEY intelligence base..."}
+                            placeholder={isRecording ? "Listening..." : isTranscribing ? "Transcribing..." : "Query the MOIJEY intelligence base..."}
                             className={`w-full bg-surface/30 border rounded-2xl lg:rounded-3xl py-3 lg:py-4 pl-4 lg:pl-6 pr-24 lg:pr-28 focus:outline-none transition-all resize-none text-sm placeholder:text-muted/50 ${isRecording ? "border-red-400/50 placeholder:text-red-400/60" : "border-border/50 focus:border-accent/50"}`}
                         />
                         {/* Mic button */}
@@ -889,11 +995,14 @@ export default function ChatInterface() {
                             <button
                                 type="button"
                                 onClick={toggleRecording}
-                                title={isRecording ? "Stop recording" : "Speak your question"}
-                                className={`absolute right-12 lg:right-14 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl flex items-center justify-center transition-all ${
+                                disabled={isTranscribing}
+                                title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing..." : "Speak your question"}
+                                className={`absolute right-12 lg:right-14 top-1/2 -translate-y-1/2 w-9 h-9 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl flex items-center justify-center transition-all disabled:cursor-wait ${
                                     isRecording
                                         ? "bg-red-500/10 text-red-400 animate-pulse"
-                                        : "text-muted hover:text-accent hover:bg-accent/10"
+                                        : isTranscribing
+                                            ? "text-accent/60 animate-pulse"
+                                            : "text-muted hover:text-accent hover:bg-accent/10"
                                 }`}
                             >
                                 {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -910,13 +1019,19 @@ export default function ChatInterface() {
                                 Recording — speak now, then click stop or the send button
                             </p>
                         )}
-                        {micError && !isRecording && (
+                        {isTranscribing && !isRecording && (
+                            <p className="text-[10px] text-accent text-center mt-2 flex items-center justify-center gap-1.5 animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />
+                                Transcribing...
+                            </p>
+                        )}
+                        {micError && !isRecording && !isTranscribing && (
                             <p className="text-[10px] text-red-400 text-center mt-2 flex items-center justify-center gap-1.5">
                                 <MicOff className="w-3 h-3 shrink-0" />
                                 {micError}
                             </p>
                         )}
-                        {!isRecording && !micError && (
+                        {!isRecording && !isTranscribing && !micError && (
                             <p className="text-[9px] lg:text-[10px] text-center text-muted mt-2 uppercase tracking-tighter hidden sm:flex items-center justify-center gap-2">
                                 <Info className="w-3 h-3" />
                                 Always verify pricing with the MOIJEY ERP before quoting.
