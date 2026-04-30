@@ -35,6 +35,7 @@ interface RecommendationResult {
   internalSummary: string;
   emailDraft: string;
   emailSent: boolean;
+  emailError?: string | null;
   customOrderSuggested: boolean;
 }
 
@@ -106,6 +107,7 @@ export default function RecommendationMode() {
     if (!result) return;
 
     setLoading(true);
+    setError(null);
     try {
       // Re-submit with sendEmail flag
       const response = await fetch("/api/copilot/recommend", {
@@ -129,7 +131,11 @@ export default function RecommendationMode() {
       }
 
       setResult(data.data);
-      setError(null);
+      // The API returns 200 even when Resend itself rejects the send.
+      // Surface the underlying provider error so failures aren't silent.
+      if (!data.data?.emailSent && data.data?.emailError) {
+        setError(`Email could not be sent: ${data.data.emailError}`);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to send email");
     } finally {
@@ -448,6 +454,13 @@ export default function RecommendationMode() {
                 </div>
               )}
             </motion.div>
+
+            {error && (
+              <div className="bg-red-900/30 border border-red-500 rounded px-4 py-3 text-red-200 flex gap-2">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <p className="wrap-break-word">{error}</p>
+              </div>
+            )}
 
             {/* Send Email */}
             <motion.div
