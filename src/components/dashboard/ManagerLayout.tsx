@@ -72,7 +72,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
     const currentPage = menuItems.find(i => i.href === pathname)?.name || "Team Overview";
 
     return (
-        <div className="flex min-h-screen bg-background text-foreground">
+        <div className="flex h-screen overflow-hidden bg-background text-foreground">
 
             {/* ── Mobile backdrop ───────────────────────────────────────────── */}
             {mobileOpen && (

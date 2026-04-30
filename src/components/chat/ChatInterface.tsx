@@ -407,19 +407,19 @@ function SidebarContent({
                         </div>
                     )}
 
-                    {/* Toggle: switch between active and archived views. Hidden until the rep
-                        has at least one conversation, otherwise it's noise. */}
-                    {(totalConversations > 0 || showArchived) && (
-                        <div className="px-3 pt-3 mt-3 border-t border-border/30">
-                            <button
-                                onClick={onToggleShowArchived}
-                                className="w-full text-left px-2 py-2 rounded-lg text-[11px] text-muted hover:text-accent hover:bg-accent/5 transition-colors flex items-center gap-2"
-                            >
-                                {showArchived ? <ArchiveRestore className="w-3 h-3" /> : <Archive className="w-3 h-3" />}
-                                {showArchived ? "Back to active consultations" : "Show archived"}
-                            </button>
-                        </div>
-                    )}
+                    {/* Toggle: switch between active and archived views. Always visible —
+                        a rep who archived everything has no way back to their archives if
+                        we hide this. The active view shows nothing in that case, so this
+                        link is the only path to recovery. */}
+                    <div className="px-3 pt-3 mt-3 border-t border-border/30">
+                        <button
+                            onClick={onToggleShowArchived}
+                            className="w-full text-left px-2 py-2 rounded-lg text-[11px] text-muted hover:text-accent hover:bg-accent/5 transition-colors flex items-center gap-2"
+                        >
+                            {showArchived ? <ArchiveRestore className="w-3 h-3" /> : <Archive className="w-3 h-3" />}
+                            {showArchived ? "Back to active consultations" : "Show archived"}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Saved Intelligence */}

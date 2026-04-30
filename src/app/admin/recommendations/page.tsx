@@ -46,7 +46,7 @@ interface Stats {
     this_week: number;
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 export default function RecommendationsPage() {
     const [rows, setRows] = useState<RecRow[]>([]);
