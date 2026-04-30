@@ -1,5 +1,5 @@
 import { db } from "../db/db-client";
-import { vectorService } from "../vector/vector-service";
+import { vectorService, type ProductMatch } from "../vector/vector-service";
 import { aiService } from "./ai-service";
 import { TtlCache } from "@/lib/cache";
 
@@ -10,6 +10,10 @@ const MIN_SIMILARITY_SCORE = 0.2; // Drop chunks with cosine similarity below th
 const CHUNK_LIMIT = 10;           // Retrieve up to 10, trim by score before building prompt
 const FALLBACK_CHUNKS = 3;        // If nothing passes threshold, include top N as best-effort
 const HISTORY_TURNS = 4;          // How many prior message pairs to include for multi-turn context
+const PRODUCT_LIMIT = 5;          // How many top product matches to retrieve from the live catalog
+const MIN_PRODUCT_SCORE = 0.25;   // Minimum cosine similarity for a product to be "matching"
+
+export type SuggestedProduct = ProductMatch;
 
 export interface PriorMessage {
     role: "user" | "assistant";
@@ -46,9 +50,16 @@ async function buildRagContext(
     mode: "short" | "detailed",
     history: PriorMessage[] = []
 ) {
-    const [chunks, facts] = await Promise.all([
+    // Run knowledge chunks, business facts, and product matches in parallel.
+    // Product search is best-effort — if the catalog isn't embedded yet (or query fails),
+    // we still want chat to work, so we catch and return [].
+    const [chunks, facts, products] = await Promise.all([
         vectorService.searchSimilarChunks(query, workspaceId, CHUNK_LIMIT),
         getBusinessFacts(workspaceId),
+        vectorService.searchSimilarProducts(query, PRODUCT_LIMIT).catch(err => {
+            console.error("Product search failed (continuing without products):", err.message);
+            return [];
+        }),
     ]);
     const aboveThreshold = chunks.filter(c => c.score >= MIN_SIMILARITY_SCORE);
     const relevantChunks = aboveThreshold.length > 0 ? aboveThreshold : chunks.slice(0, FALLBACK_CHUNKS);
@@ -73,6 +84,16 @@ async function buildRagContext(
     }
     const citations: Citation[] = [...byDoc.values()].sort((a, b) => b.score - a.score);
 
+    // Filter products by similarity threshold so we don't show wildly off-topic items
+    const relevantProducts = products.filter(p => p.score >= MIN_PRODUCT_SCORE);
+    const productsBlock = relevantProducts.length
+        ? `\nMATCHING PRODUCTS (live inventory — these are real items the rep can recommend; cite by name, NEVER paste the URL):\n${relevantProducts.map((p, i) => {
+            const attrs = [p.diamond_shape, p.metal, p.style].filter(Boolean).join(", ");
+            const priceTxt = p.price_display || (p.price ? `$${p.price.toLocaleString()}` : "price on request");
+            return `${i + 1}. ${p.title} — ${priceTxt}${attrs ? ` (${attrs})` : ""}`;
+        }).join("\n")}\n`
+        : "";
+
     const historyBlock = formatHistory(history);
 
     const prompt = `
@@ -84,7 +105,7 @@ ${facts || "None on file."}
 
 REFERENCE INFORMATION (internal — do NOT quote or mention these sources to the client):
 ${context || "No relevant information found."}
-
+${productsBlock}
 ${historyBlock}CLIENT QUESTION (asked to the sales rep):
 ${query}
 
@@ -99,15 +120,17 @@ RESPONSE RULES:
 8. NEVER invent specific prices, SKUs, or policies not in the reference information.
 9. If the topic is completely absent from the reference information above, reply with exactly: "Let me check with my manager and get right back to you on that." Nothing before it. Nothing after it (other than the SUGGESTIONS line).
 10. If a PRIOR CONVERSATION block is present above, treat the new question as a continuation. Resolve pronouns ("it", "that", "this") and short follow-ups ("what about for women?") against the prior turns, and don't restate context the client already gave.
-11. After your answer, on a NEW LINE output exactly this (no extra text, always 3 items — phrase as natural follow-up questions a client would ask):
+11. If a MATCHING PRODUCTS block is present above, the rep CAN naturally mention these specific items by name and price when relevant. Pick the best fits, don't list all of them. Never invent a product not in that list. Never paste URLs into your answer — the UI shows the rep cards alongside.
+12. After your answer, on a NEW LINE output exactly this (no extra text, always 3 items — phrase as natural follow-up questions a client would ask):
 SUGGESTIONS:["<follow-up question 1>","<follow-up question 2>","<follow-up question 3>"]
 
 ANSWER:`;
-    console.log(`RAG context: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, history turns: ${history.length})`);
+    console.log(`RAG context: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, history turns: ${history.length}, products: ${relevantProducts.length}/${products.length})`);
     return {
         prompt,
         citations,
         lowConfidence,
+        products: relevantProducts,
         model: process.env.COMPLETION_MODEL_ID || "gemini-2.5-flash",
     };
 }
@@ -120,15 +143,16 @@ export const ragService = {
         mode: "short" | "detailed" = "short",
         history: PriorMessage[] = []
     ) {
-        const { prompt, citations, lowConfidence, model } = await buildRagContext(query, workspaceId, mode, history);
+        const { prompt, citations, lowConfidence, products, model } = await buildRagContext(query, workspaceId, mode, history);
         const startTime = Date.now();
         const answer = await aiService.generateAnswer(prompt);
-        return { answer, citations, lowConfidence, latency_ms: Date.now() - startTime, model };
+        return { answer, citations, lowConfidence, products, latency_ms: Date.now() - startTime, model };
     },
 
     /**
      * Streaming — retrieves context synchronously, then streams Gemini tokens.
-     * Returns citations + lowConfidence flag upfront, plus an AsyncGenerator of text tokens.
+     * Returns citations, lowConfidence flag, and matching products upfront,
+     * plus an AsyncGenerator of text tokens.
      */
     async getAnswerStream(
         query: string,
@@ -136,9 +160,9 @@ export const ragService = {
         mode: "short" | "detailed" = "short",
         history: PriorMessage[] = []
     ) {
-        const { prompt, citations, lowConfidence, model } = await buildRagContext(query, workspaceId, mode, history);
+        const { prompt, citations, lowConfidence, products, model } = await buildRagContext(query, workspaceId, mode, history);
         const tokenStream = aiService.generateAnswerStream(prompt);
-        return { citations, lowConfidence, tokenStream, model };
+        return { citations, lowConfidence, products, tokenStream, model };
     },
 };
 

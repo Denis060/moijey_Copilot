@@ -24,6 +24,12 @@ export async function POST(req: Request) {
         const userId = session.user.id;
         const workspaceId = (session.user as any).workspace_id;
 
+        // One-time idempotent migration so this route can persist the new "products" column
+        // without a separate manual schema change. Cheap on every request, only fires DDL once.
+        await db.query(
+            `ALTER TABLE messages ADD COLUMN IF NOT EXISTS products JSONB DEFAULT '[]'`
+        ).catch(err => console.warn("messages.products schema add warn:", err.message));
+
         // 1. Load prior turns (only if continuing an existing conversation), then run
         //    RAG + conversation upsert in parallel.
         const history = conversationId ? await loadConversationHistory(conversationId) : [];
@@ -37,7 +43,7 @@ export async function POST(req: Request) {
                   ).then(r => r.rows[0].id as string),
         ]);
 
-        const { citations, lowConfidence, tokenStream, model } = ragResult;
+        const { citations, lowConfidence, products, tokenStream, model } = ragResult;
 
         // 2. Save user message (before we start streaming)
         await db.query(
@@ -52,8 +58,8 @@ export async function POST(req: Request) {
 
         const stream = new ReadableStream({
             async start(controller) {
-                // Send metadata first so client knows convId + citations + confidence immediately
-                controller.enqueue(ev({ type: "meta", conversationId: convId, citations, lowConfidence }));
+                // Send metadata first so client knows convId + citations + confidence + products immediately
+                controller.enqueue(ev({ type: "meta", conversationId: convId, citations, lowConfidence, products }));
 
                 let fullAnswer = "";
                 try {
@@ -69,8 +75,8 @@ export async function POST(req: Request) {
 
                 // Save assistant message + audit log after stream completes
                 await db.query(
-                    "INSERT INTO messages (conversation_id, role, content, citations, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5)",
-                    [convId, fullAnswer, JSON.stringify(citations), latency, model]
+                    "INSERT INTO messages (conversation_id, role, content, citations, products, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5, $6)",
+                    [convId, fullAnswer, JSON.stringify(citations), JSON.stringify(products), latency, model]
                 );
                 db.query(
                     "INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)",

@@ -44,10 +44,26 @@ interface Citation {
     score?: number;
 }
 
+interface SuggestedProduct {
+    id: string;
+    product_id: string;
+    title: string;
+    price: number | null;
+    price_display: string | null;
+    image_url: string | null;
+    shopify_url: string | null;
+    diamond_shape: string | null;
+    metal: string | null;
+    style: string | null;
+    description_short: string | null;
+    score: number;
+}
+
 interface Message {
     role: "user" | "assistant";
     content: string;
     citations?: Citation[];
+    products?: SuggestedProduct[];
     suggestions?: string[];
     lowConfidence?: boolean;
     aborted?: boolean;
@@ -479,7 +495,12 @@ export default function ChatInterface() {
             const res = await fetch(`/api/conversations/${conv.id}/messages`);
             const data = await res.json();
             if (Array.isArray(data)) {
-                setMessages(data.map((m: any) => ({ role: m.role, content: m.content, citations: m.citations ?? [] })));
+                setMessages(data.map((m: any) => ({
+                    role: m.role,
+                    content: m.content,
+                    citations: m.citations ?? [],
+                    products: m.products ?? [],
+                })));
                 setConversationId(conv.id);
                 setSavedIdxSet(new Set());
             }
@@ -535,6 +556,7 @@ export default function ChatInterface() {
             const decoder = new TextDecoder();
             let buffer = "";
             let pendingCitations: Citation[] = [];
+            let pendingProducts: SuggestedProduct[] = [];
             let pendingLowConfidence = false;
             let firstToken = true;
 
@@ -552,6 +574,7 @@ export default function ChatInterface() {
 
                     if (event.type === "meta") {
                         pendingCitations = event.citations ?? [];
+                        pendingProducts = event.products ?? [];
                         pendingLowConfidence = !!event.lowConfidence;
                         if (!conversationId && event.conversationId) {
                             setConversationId(event.conversationId);
@@ -577,6 +600,7 @@ export default function ChatInterface() {
                                 role: "assistant",
                                 content: event.text,
                                 citations: pendingCitations,
+                                products: pendingProducts,
                                 lowConfidence: pendingLowConfidence,
                             }]);
                         } else {
@@ -987,6 +1011,45 @@ export default function ChatInterface() {
                                             ? <MarkdownContent content={parseContent(m.content).text} />
                                             : m.content}
                                     </div>
+                                    {m.role === 'assistant' && m.products && m.products.length > 0 && (
+                                        <div className="space-y-2">
+                                            <p className="text-[10px] uppercase tracking-widest text-muted font-bold">Matching from inventory</p>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                {m.products.slice(0, 4).map(p => (
+                                                    <a
+                                                        key={p.id}
+                                                        href={p.shopify_url || "#"}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="group flex gap-3 p-2.5 rounded-2xl border border-border/50 bg-surface/20 hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                                                    >
+                                                        {p.image_url ? (
+                                                            // eslint-disable-next-line @next/next/no-img-element
+                                                            <img
+                                                                src={p.image_url}
+                                                                alt=""
+                                                                className="w-14 h-14 rounded-xl object-cover bg-surface/40 shrink-0"
+                                                                onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                                            />
+                                                        ) : (
+                                                            <div className="w-14 h-14 rounded-xl bg-surface/40 flex items-center justify-center shrink-0">
+                                                                <BookOpen className="w-4 h-4 text-muted" />
+                                                            </div>
+                                                        )}
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-xs font-medium text-foreground/90 line-clamp-2 group-hover:text-accent transition-colors">{p.title}</p>
+                                                            <p className="text-[11px] text-accent font-semibold mt-0.5">
+                                                                {p.price_display || (p.price !== null ? `$${p.price.toLocaleString()}` : "Price on request")}
+                                                            </p>
+                                                            <p className="text-[10px] text-muted truncate mt-0.5">
+                                                                {[p.diamond_shape, p.metal, p.style].filter(Boolean).join(" · ") || "—"}
+                                                            </p>
+                                                        </div>
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                     {m.role === 'assistant' && (
                                         <div className="flex items-center gap-2 flex-wrap">
                                             {m.lowConfidence && (

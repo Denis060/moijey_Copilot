@@ -2,10 +2,70 @@ import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/db-client";
 import { parse } from "csv-parse/sync";
+import { aiService } from "@/lib/ai/ai-service";
 
 export const maxDuration = 60;
 
 const REQUIRED_COLUMNS = ["product_id", "title"];
+
+// Build the text we feed to the embedding model — combines all the searchable
+// attributes of a product into one string. Empty fields are skipped.
+function composeEmbeddingText(p: {
+    title?: string | null; category?: string | null; diamond_shape?: string | null;
+    metal?: string | null; style?: string | null; description_short?: string | null;
+    tags?: string[] | null;
+}): string {
+    const parts: string[] = [
+        p.title || "",
+        p.category || "",
+        p.diamond_shape || "",
+        p.metal || "",
+        p.style || "",
+        p.description_short || "",
+        Array.isArray(p.tags) ? p.tags.join(" ") : "",
+    ];
+    return parts.filter(Boolean).join(" ").trim();
+}
+
+// Embed any products that don't yet have a vector, with bounded concurrency.
+// Stops early if we approach the function's runtime budget so we still return a response.
+async function embedPendingProducts(softDeadlineMs: number): Promise<{
+    embedded: number; failed: number; remaining: number;
+}> {
+    const pending = await db.query(
+        `SELECT id, product_id, title, category, diamond_shape, metal, style, description_short, tags
+         FROM products
+         WHERE embedding IS NULL`
+    );
+    const queue = [...pending.rows];
+    let embedded = 0;
+    let failed = 0;
+    const CONCURRENCY = 8;
+
+    async function worker() {
+        while (queue.length > 0) {
+            if (Date.now() > softDeadlineMs) return; // Bail out before the function gets killed
+            const p = queue.shift();
+            if (!p) return;
+            const text = composeEmbeddingText(p);
+            if (!text) { failed++; continue; }
+            try {
+                const vec = await aiService.generateEmbedding(text);
+                await db.query(
+                    `UPDATE products SET embedding = $1::vector WHERE id = $2`,
+                    [`[${vec.join(",")}]`, p.id]
+                );
+                embedded++;
+            } catch (err: any) {
+                console.error(`Embedding failed for ${p.product_id}:`, err.message);
+                failed++;
+            }
+        }
+    }
+
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+    return { embedded, failed, remaining: queue.length };
+}
 
 // Map a parsed CSV row to the products row shape. Returns null on missing required fields.
 function rowToProduct(record: Record<string, string>): Record<string, any> | null {
@@ -175,12 +235,24 @@ export async function POST(req: Request) {
             }
         }
 
+        // Embed any products that don't yet have vectors (new rows, plus anything previously
+        // skipped). Bounded by a soft deadline so we always return within the function budget.
+        const importStart = Date.now();
+        const SOFT_DEADLINE = importStart + 45_000;
+        const embedStats = await embedPendingProducts(SOFT_DEADLINE).catch(err => {
+            console.error("Embedding pass failed:", err);
+            return { embedded: 0, failed: 0, remaining: -1 };
+        });
+
         const workspaceId = (session.user as any).workspace_id;
         await db.query(
             `INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details)
              VALUES ($1, $2, $3, $4, $5, $6)`,
             [workspaceId, (session.user as any).id, "IMPORT_PRODUCTS", "products", null,
-             JSON.stringify({ inserted, failed, skipped_invalid: skippedInvalid, total_rows: records.length })]
+             JSON.stringify({
+                 inserted, failed, skipped_invalid: skippedInvalid, total_rows: records.length,
+                 embedded: embedStats.embedded, embed_failed: embedStats.failed, embed_remaining: embedStats.remaining,
+             })]
         ).catch(() => { /* audit failures shouldn't block the response */ });
 
         return NextResponse.json({
@@ -190,6 +262,7 @@ export async function POST(req: Request) {
             skipped_invalid: skippedInvalid,
             total_rows: records.length,
             errors: errors.length ? errors : undefined,
+            embeddings: embedStats,
         });
     } catch (error: any) {
         console.error("Products import error:", error);
