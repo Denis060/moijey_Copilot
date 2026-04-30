@@ -40,7 +40,7 @@ async function embedPendingProducts(softDeadlineMs: number): Promise<{
     const queue = [...pending.rows];
     let embedded = 0;
     let failed = 0;
-    const CONCURRENCY = 8;
+    const CONCURRENCY = 16;
 
     async function worker() {
         while (queue.length > 0) {

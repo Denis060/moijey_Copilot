@@ -9,7 +9,7 @@ const factsCache = new TtlCache<string, string>(5 * 60 * 1000);
 const MIN_SIMILARITY_SCORE = 0.2; // Drop chunks with cosine similarity below this
 const CHUNK_LIMIT = 10;           // Retrieve up to 10, trim by score before building prompt
 const FALLBACK_CHUNKS = 3;        // If nothing passes threshold, include top N as best-effort
-const HISTORY_TURNS = 4;          // How many prior message pairs to include for multi-turn context
+const HISTORY_TURNS = 2;          // How many prior message pairs to include for multi-turn context
 const PRODUCT_LIMIT = 5;          // How many top product matches to retrieve from the live catalog
 const MIN_PRODUCT_SCORE = 0.25;   // Minimum cosine similarity for a product to be "matching"
 
@@ -43,16 +43,28 @@ function formatHistory(messages: PriorMessage[]): string {
     return `PRIOR CONVERSATION (the rep and the same client have been talking — keep continuity, don't repeat earlier answers verbatim):\n${lines.join("\n")}\n`;
 }
 
-/** Shared retrieval logic — embed, search, facts, build prompt */
-async function buildRagContext(
-    query: string,
-    workspaceId: string,
-    mode: "short" | "detailed",
-    history: PriorMessage[] = []
-) {
-    // Run knowledge chunks, business facts, and product matches in parallel.
-    // Product search is best-effort — if the catalog isn't embedded yet (or query fails),
-    // we still want chat to work, so we catch and return [].
+/**
+ * Output of the retrieval phase. Captures everything that depends ONLY on the
+ * current query + workspace, so callers can run this in parallel with anything
+ * that depends on the conversation (like history loading).
+ */
+export interface RetrievedContext {
+    citations: Citation[];
+    lowConfidence: boolean;
+    products: SuggestedProduct[];
+    /** Pre-formatted reference block ready to drop into the prompt. */
+    contextBlock: string;
+    /** Pre-formatted products block (empty string when no matches). */
+    productsBlock: string;
+    /** Pre-formatted business facts (empty string when none). */
+    facts: string;
+}
+
+/**
+ * Phase 1: do the work that only depends on the user's current question —
+ * embed, vector search across chunks + products, load business facts.
+ */
+async function retrieve(query: string, workspaceId: string): Promise<RetrievedContext> {
     const [chunks, facts, products] = await Promise.all([
         vectorService.searchSimilarChunks(query, workspaceId, CHUNK_LIMIT),
         getBusinessFacts(workspaceId),
@@ -65,11 +77,9 @@ async function buildRagContext(
     const relevantChunks = aboveThreshold.length > 0 ? aboveThreshold : chunks.slice(0, FALLBACK_CHUNKS);
     const lowConfidence = aboveThreshold.length === 0 && relevantChunks.length > 0;
 
-    const context = relevantChunks.map(c => `[SOURCE: ${c.title}] ${c.content}`).join("\n\n");
+    const contextBlock = relevantChunks.map(c => `[SOURCE: ${c.title}] ${c.content}`).join("\n\n");
 
-    // Dedupe citations by document_id so the UI shows one badge per source document
-    // (when multiple chunks from the same PDF contribute, we keep the highest-scoring one
-    // for the modal preview). Order: best match first.
+    // Dedupe citations by document_id so the UI shows one badge per source document.
     const byDoc = new Map<string, Citation>();
     for (const c of relevantChunks) {
         const existing = byDoc.get(c.document_id);
@@ -84,7 +94,6 @@ async function buildRagContext(
     }
     const citations: Citation[] = [...byDoc.values()].sort((a, b) => b.score - a.score);
 
-    // Filter products by similarity threshold so we don't show wildly off-topic items
     const relevantProducts = products.filter(p => p.score >= MIN_PRODUCT_SCORE);
     const productsBlock = relevantProducts.length
         ? `\nMATCHING PRODUCTS (live inventory — these are real items the rep can recommend; cite by name, NEVER paste the URL):\n${relevantProducts.map((p, i) => {
@@ -94,18 +103,39 @@ async function buildRagContext(
         }).join("\n")}\n`
         : "";
 
-    const historyBlock = formatHistory(history);
+    console.log(`RAG retrieve: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, products: ${relevantProducts.length}/${products.length})`);
 
-    const prompt = `
+    return {
+        citations,
+        lowConfidence,
+        products: relevantProducts,
+        contextBlock,
+        productsBlock,
+        facts,
+    };
+}
+
+/**
+ * Phase 2: assemble the prompt from already-retrieved context + history + the
+ * current query. Pure string assembly, no I/O.
+ */
+function buildPromptFromContext(
+    query: string,
+    retrieved: RetrievedContext,
+    history: PriorMessage[],
+    mode: "short" | "detailed",
+): string {
+    const historyBlock = formatHistory(history);
+    return `
 YOU ARE THE MOIJEY SALES REP AI CO-PILOT — a luxury jewelry sales expert whispering in the sales rep's ear.
 Your job: give the rep a ready-to-speak response they can deliver directly to the client, word for word.
 
 MOIJEY BUSINESS FACTS:
-${facts || "None on file."}
+${retrieved.facts || "None on file."}
 
 REFERENCE INFORMATION (internal — do NOT quote or mention these sources to the client):
-${context || "No relevant information found."}
-${productsBlock}
+${retrieved.contextBlock || "No relevant information found."}
+${retrieved.productsBlock}
 ${historyBlock}CLIENT QUESTION (asked to the sales rep):
 ${query}
 
@@ -125,44 +155,66 @@ RESPONSE RULES:
 SUGGESTIONS:["<follow-up question 1>","<follow-up question 2>","<follow-up question 3>"]
 
 ANSWER:`;
-    console.log(`RAG context: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, history turns: ${history.length}, products: ${relevantProducts.length}/${products.length})`);
-    return {
-        prompt,
-        citations,
-        lowConfidence,
-        products: relevantProducts,
-        model: process.env.COMPLETION_MODEL_ID || "gemini-2.5-flash",
-    };
 }
 
+const COMPLETION_MODEL = process.env.COMPLETION_MODEL_ID || "gemini-2.5-flash";
+
 export const ragService = {
-    /** Non-streaming — returns full answer (kept for scripts/tests) */
-    async getAnswer(
-        query: string,
-        workspaceId: string,
-        mode: "short" | "detailed" = "short",
-        history: PriorMessage[] = []
-    ) {
-        const { prompt, citations, lowConfidence, products, model } = await buildRagContext(query, workspaceId, mode, history);
-        const startTime = Date.now();
-        const answer = await aiService.generateAnswer(prompt);
-        return { answer, citations, lowConfidence, products, latency_ms: Date.now() - startTime, model };
-    },
+    /** Phase 1 (exposed): do the retrieval work that only needs the current query. */
+    retrieve,
 
     /**
-     * Streaming — retrieves context synchronously, then streams Gemini tokens.
-     * Returns citations, lowConfidence flag, and matching products upfront,
+     * Phase 2 (streaming): given pre-retrieved context + history, build the prompt and
+     * start streaming. Returns citations / products / lowConfidence flags upfront for the UI,
      * plus an AsyncGenerator of text tokens.
      */
+    streamFromContext(
+        query: string,
+        retrieved: RetrievedContext,
+        history: PriorMessage[],
+        mode: "short" | "detailed" = "short",
+    ) {
+        const prompt = buildPromptFromContext(query, retrieved, history, mode);
+        const tokenStream = aiService.generateAnswerStream(prompt);
+        return {
+            citations: retrieved.citations,
+            lowConfidence: retrieved.lowConfidence,
+            products: retrieved.products,
+            tokenStream,
+            model: COMPLETION_MODEL,
+        };
+    },
+
+    /** Convenience wrapper: retrieve + stream in one call. Used by scripts/tests. */
     async getAnswerStream(
         query: string,
         workspaceId: string,
         mode: "short" | "detailed" = "short",
         history: PriorMessage[] = []
     ) {
-        const { prompt, citations, lowConfidence, products, model } = await buildRagContext(query, workspaceId, mode, history);
-        const tokenStream = aiService.generateAnswerStream(prompt);
-        return { citations, lowConfidence, products, tokenStream, model };
+        const retrieved = await retrieve(query, workspaceId);
+        return ragService.streamFromContext(query, retrieved, history, mode);
+    },
+
+    /** Non-streaming convenience wrapper, kept for scripts/tests. */
+    async getAnswer(
+        query: string,
+        workspaceId: string,
+        mode: "short" | "detailed" = "short",
+        history: PriorMessage[] = []
+    ) {
+        const retrieved = await retrieve(query, workspaceId);
+        const prompt = buildPromptFromContext(query, retrieved, history, mode);
+        const startTime = Date.now();
+        const answer = await aiService.generateAnswer(prompt);
+        return {
+            answer,
+            citations: retrieved.citations,
+            lowConfidence: retrieved.lowConfidence,
+            products: retrieved.products,
+            latency_ms: Date.now() - startTime,
+            model: COMPLETION_MODEL,
+        };
     },
 };
 

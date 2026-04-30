@@ -30,18 +30,21 @@ export async function POST(req: Request) {
             `ALTER TABLE messages ADD COLUMN IF NOT EXISTS products JSONB DEFAULT '[]'`
         ).catch(err => console.warn("messages.products schema add warn:", err.message));
 
-        // 1. Load prior turns (only if continuing an existing conversation), then run
-        //    RAG + conversation upsert in parallel.
-        const history = conversationId ? await loadConversationHistory(conversationId) : [];
-        const [ragResult, convId] = await Promise.all([
-            ragService.getAnswerStream(query, workspaceId, mode || "short", history),
-            conversationId
-                ? Promise.resolve(conversationId as string)
-                : db.query(
-                    "INSERT INTO conversations (user_id, workspace_id, title) VALUES ($1, $2, $3) RETURNING id",
-                    [userId, workspaceId, query.substring(0, 60)]
-                  ).then(r => r.rows[0].id as string),
-        ]);
+        // 1. Run retrieval (embedding + chunks + facts + products), history-load, and
+        //    conversation upsert all in parallel. The retrieval doesn't actually need
+        //    history; only the final prompt does. Splitting them saves ~100ms of waterfall
+        //    latency on multi-turn questions.
+        const retrievalPromise = ragService.retrieve(query, workspaceId);
+        const historyPromise = conversationId ? loadConversationHistory(conversationId) : Promise.resolve([]);
+        const convIdPromise: Promise<string> = conversationId
+            ? Promise.resolve(conversationId as string)
+            : db.query(
+                "INSERT INTO conversations (user_id, workspace_id, title) VALUES ($1, $2, $3) RETURNING id",
+                [userId, workspaceId, query.substring(0, 60)]
+              ).then(r => r.rows[0].id as string);
+
+        const [retrieved, history, convId] = await Promise.all([retrievalPromise, historyPromise, convIdPromise]);
+        const ragResult = ragService.streamFromContext(query, retrieved, history, mode || "short");
 
         const { citations, lowConfidence, products, tokenStream, model } = ragResult;
 
