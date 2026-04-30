@@ -41,33 +41,12 @@ export const copilotRecommendationService = {
    * Find matching products based on customer requirements
    */
   async findMatches(input: RecommendationInput): Promise<Product[]> {
-    const { budgetMin, budgetMax, diamondShape, metal, style, notes } = input;
+    const { productType, budgetMin, budgetMax, diamondShape, metal, style } = input;
 
-    // Build semantic search query from requirements
-    const searchQuery = [
-      notes || "",
-      style ? `${style} style` : "",
-      diamondShape ? `${diamondShape} diamond` : "",
-      metal ? `${metal} metal` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    // Get embedding for semantic search
-    let embedding: number[] | null = null;
-    if (searchQuery) {
-      try {
-        embedding = await aiService.generateEmbedding(searchQuery);
-      } catch (error) {
-        console.error("Failed to generate embedding:", error);
-      }
-    }
-
-    // Build base query
     let query = `
-      SELECT 
+      SELECT
         id, product_id, title, category, price, image_url,
-        diamond_shape, metal, style, description_short, 
+        diamond_shape, metal, style, description_short,
         shopify_url, tags
       FROM products
       WHERE in_stock = true
@@ -76,43 +55,65 @@ export const copilotRecommendationService = {
     const params: any[] = [];
     let paramCount = 1;
 
-    // Add budget filter
-    if (budgetMin || budgetMax) {
-      if (budgetMin) {
-        query += ` AND price >= $${paramCount}`;
-        params.push(budgetMin);
-        paramCount++;
-      }
-      if (budgetMax) {
-        query += ` AND price <= $${paramCount}`;
-        params.push(budgetMax);
+    // Product type filter — split the form value into significant words and require each
+    // to appear in either the category or the title. Catches "engagement ring" when the
+    // category is stored as "engagement_ring", and avoids returning necklaces/earrings
+    // when the rep asked for a ring.
+    if (productType) {
+      const words = productType
+        .toLowerCase()
+        .split(/\s+/)
+        .map(w => w.trim())
+        .filter(w => w.length >= 3); // drop "of", "a", etc.
+      for (const word of words) {
+        query += ` AND (LOWER(category) LIKE $${paramCount} OR LOWER(title) LIKE $${paramCount})`;
+        params.push(`%${word}%`);
         paramCount++;
       }
     }
 
-    // Add exact match filters
+    // Budget filter
+    if (budgetMin) {
+      query += ` AND price >= $${paramCount}`;
+      params.push(budgetMin);
+      paramCount++;
+    }
+    if (budgetMax) {
+      query += ` AND price <= $${paramCount}`;
+      params.push(budgetMax);
+      paramCount++;
+    }
+
+    // Exact attribute matches
     if (diamondShape) {
       query += ` AND LOWER(diamond_shape) = LOWER($${paramCount})`;
       params.push(diamondShape);
       paramCount++;
     }
-
     if (metal) {
       query += ` AND LOWER(metal) = LOWER($${paramCount})`;
       params.push(metal);
       paramCount++;
     }
-
     if (style) {
       query += ` AND LOWER(style) ILIKE LOWER($${paramCount})`;
       params.push(`%${style}%`);
       paramCount++;
     }
 
-    // Order by relevance - exact matches first, then by price proximity
-    if (budgetMax) {
+    // Sort by proximity to the budget midpoint (or to budgetMax / budgetMin if only one
+    // bound is given). Previously used `budgetMin || 0 + budgetMax` which parses as
+    // `budgetMin || (0 + budgetMax)` due to operator precedence — pinned the target to
+    // budgetMin instead of the midpoint.
+    if (budgetMin && budgetMax) {
       query += ` ORDER BY ABS(price - $${paramCount}) ASC LIMIT 20`;
-      params.push((budgetMin || 0 + budgetMax) / 2);
+      params.push((budgetMin + budgetMax) / 2);
+    } else if (budgetMax) {
+      query += ` ORDER BY ABS(price - $${paramCount}) ASC LIMIT 20`;
+      params.push(budgetMax);
+    } else if (budgetMin) {
+      query += ` ORDER BY ABS(price - $${paramCount}) ASC LIMIT 20`;
+      params.push(budgetMin);
     } else {
       query += ` LIMIT 20`;
     }
