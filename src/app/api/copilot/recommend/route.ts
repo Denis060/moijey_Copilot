@@ -13,7 +13,7 @@ export async function POST(req: Request) {
 
     // Check user role - allow sales_rep, manager, admin
     const userQuery = `
-      SELECT u.id, u.role_id, r.name as role_name
+      SELECT u.id, u.workspace_id, u.role_id, r.name as role_name
       FROM users u
       JOIN roles r ON u.role_id = r.id
       WHERE u.email = $1
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
     // Save recommendation to database
     await copilotRecommendationService.saveRecommendation(
       user.id,
-      session.user.email.split("@")[1] === "moijeydiamonds.com" ? "default" : "default",
+      user.workspace_id,
       {
         customerName,
         customerEmail,
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
       `INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [
-        "default",
+        user.workspace_id,
         user.id,
         "GENERATE_RECOMMENDATION",
         "recommendation",
