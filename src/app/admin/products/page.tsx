@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search, AlertTriangle } from "lucide-react";
+import { Package, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import AdminLayout from "@/components/dashboard/AdminLayout";
 
 interface Product {
@@ -28,25 +28,35 @@ interface ImportResult {
     errors?: string[];
 }
 
+const PAGE_SIZE = 10;
+
 export default function ProductsPage() {
     const [products, setProducts] = useState<Product[]>([]);
     const [stats, setStats] = useState({ total: 0, in_stock: 0, priced: 0 });
+    const [filteredTotal, setFilteredTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [search, setSearch] = useState("");
     const [lastResult, setLastResult] = useState<ImportResult | null>(null);
 
-    useEffect(() => { fetchProducts(); }, [search]);
+    // Reset to page 1 whenever the search query changes
+    useEffect(() => { setPage(1); }, [search]);
+
+    useEffect(() => { fetchProducts(); }, [search, page]);
 
     const fetchProducts = async () => {
         setLoading(true);
         try {
-            const url = search ? `/api/admin/products?q=${encodeURIComponent(search)}` : "/api/admin/products";
-            const res = await fetch(url);
+            const offset = (page - 1) * PAGE_SIZE;
+            const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+            if (search) params.set("q", search);
+            const res = await fetch(`/api/admin/products?${params}`);
             const data = await res.json();
             if (res.ok) {
                 setProducts(data.products || []);
                 setStats({ total: data.total || 0, in_stock: data.in_stock || 0, priced: data.priced || 0 });
+                setFilteredTotal(data.filtered_total ?? data.total ?? 0);
             }
         } catch (err) {
             console.error("Failed to load products:", err);
@@ -54,6 +64,10 @@ export default function ProductsPage() {
             setLoading(false);
         }
     };
+
+    const totalPages = Math.max(1, Math.ceil(filteredTotal / PAGE_SIZE));
+    const rangeStart = filteredTotal === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(page * PAGE_SIZE, filteredTotal);
 
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -259,9 +273,34 @@ export default function ProductsPage() {
                             </tbody>
                         </table>
                     </div>
-                    {products.length > 0 && stats.total > products.length && (
-                        <div className="px-6 py-3 text-xs text-muted text-center border-t border-border/30">
-                            Showing first {products.length} of {stats.total}. Use search to narrow.
+                    {filteredTotal > 0 && (
+                        <div className="px-6 py-3 flex items-center justify-between border-t border-border/30 text-xs text-muted">
+                            <span>
+                                Showing <span className="text-foreground font-semibold">{rangeStart}-{rangeEnd}</span> of{" "}
+                                <span className="text-foreground font-semibold">{filteredTotal}</span>
+                                {search && <span className="ml-1">(filtered)</span>}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    disabled={page <= 1 || loading}
+                                    className="p-2 rounded-lg border border-border/40 hover:bg-accent/10 hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                    title="Previous page"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <span className="px-2 font-semibold text-foreground">
+                                    Page {page} / {totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={page >= totalPages || loading}
+                                    className="p-2 rounded-lg border border-border/40 hover:bg-accent/10 hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                    title="Next page"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

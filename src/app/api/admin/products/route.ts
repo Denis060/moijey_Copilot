@@ -67,17 +67,24 @@ export async function GET(req: Request) {
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     );
-    const totalRes = await db.query(
+    // Stats: always reflect the whole catalog (for the cards at the top of the page).
+    const statsRes = await db.query(
         `SELECT COUNT(*)::int AS n,
                 COUNT(*) FILTER (WHERE in_stock)::int AS in_stock,
                 COUNT(*) FILTER (WHERE price IS NOT NULL)::int AS priced
          FROM products`
     );
+    // Filtered total: matches the search filter, drives pagination.
+    const filteredTotalRes = search
+        ? await db.query(`SELECT COUNT(*)::int AS n FROM products ${where}`, params.slice(0, -2))
+        : { rows: [{ n: statsRes.rows[0].n }] };
+
     return NextResponse.json({
         products: rows.rows,
-        total: totalRes.rows[0].n,
-        in_stock: totalRes.rows[0].in_stock,
-        priced: totalRes.rows[0].priced,
+        total: statsRes.rows[0].n,
+        filtered_total: filteredTotalRes.rows[0].n,
+        in_stock: statsRes.rows[0].in_stock,
+        priced: statsRes.rows[0].priced,
     });
 }
 
