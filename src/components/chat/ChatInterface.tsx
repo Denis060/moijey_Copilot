@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
+import { toast } from "sonner";
 import RecommendationMode from "@/components/copilot/RecommendationMode";
 
 interface Citation {
@@ -848,7 +849,9 @@ export default function ChatInterface() {
             }
         } catch (err: any) {
             console.error("Archive failed:", err);
-            alert(err.message || "Failed to update consultation");
+            toast.error("Couldn't update consultation", {
+                description: err.message || "Please try again.",
+            });
         } finally {
             setArchivingId(null);
         }

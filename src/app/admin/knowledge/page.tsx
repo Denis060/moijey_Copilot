@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { FileText, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import AdminLayout from "@/components/dashboard/AdminLayout";
 
 export default function KnowledgePage() {
@@ -38,7 +39,9 @@ export default function KnowledgePage() {
 
         // Vercel serverless body limit is 4.5MB
         if (file.size > 4.5 * 1024 * 1024) {
-            alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum upload size is 4.5MB.`);
+            toast.error("File too large", {
+                description: `${(file.size / 1024 / 1024).toFixed(1)}MB — maximum is 4.5MB.`,
+            });
             if (e.target) e.target.value = "";
             return;
         }
@@ -65,11 +68,13 @@ export default function KnowledgePage() {
 
             if (!res.ok) throw new Error(result.error || "Upload failed");
 
-            alert("Document uploaded successfully! It is now being processed in the background.");
+            toast.success("Document uploaded", {
+                description: "Processing in the background — refresh to track progress.",
+            });
             fetchDocs();
         } catch (err: any) {
             console.error("Upload error:", err);
-            alert(`Error uploading document: ${err.message}`);
+            toast.error("Upload failed", { description: err.message });
         } finally {
             setUploading(false);
             if (e.target) e.target.value = "";
@@ -91,7 +96,7 @@ export default function KnowledgePage() {
             }
             fetchDocs();
         } catch (err: any) {
-            alert(`Error: ${err.message}`);
+            toast.error("Reprocess failed", { description: err.message });
         } finally {
             setRetrying(null);
         }
@@ -112,11 +117,11 @@ export default function KnowledgePage() {
                 throw new Error(data.error || "Failed to delete");
             }
 
-            alert("Document deleted successfully.");
+            toast.success("Document deleted");
             fetchDocs();
         } catch (err: any) {
             console.error("Delete error:", err);
-            alert(`Error deleting document: ${err.message}`);
+            toast.error("Failed to delete document", { description: err.message });
         }
     };
 

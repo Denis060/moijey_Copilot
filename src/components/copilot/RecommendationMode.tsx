@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Send, Loader2, Package, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 
 interface RecommendationFormData {
   customerName: string;
@@ -489,9 +490,8 @@ export default function RecommendationMode() {
                   </button>
                   <button
                     onClick={() => {
-                      // Copy draft to clipboard
                       navigator.clipboard.writeText(result.emailDraft);
-                      alert("Email draft copied to clipboard!");
+                      toast.success("Email draft copied to clipboard");
                     }}
                     className="px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded font-semibold"
                   >

@@ -5,6 +5,7 @@ import {
     Users, ShieldCheck, UserX, UserCheck, RefreshCw,
     KeyRound, X, Eye, EyeOff, Trash2, UserPlus
 } from "lucide-react";
+import { toast } from "sonner";
 import AdminLayout from "@/components/dashboard/AdminLayout";
 
 const ROLES = ["admin", "manager", "sales_rep"];
@@ -133,7 +134,11 @@ export default function UsersPage() {
         try {
             const res = await fetch(`/api/admin/users/${modal.userId}`, { method: "DELETE" });
             const data = await res.json();
-            if (!res.ok) { alert(data.error || "Failed to delete user."); return; }
+            if (!res.ok) {
+                toast.error("Failed to delete user", { description: data.error });
+                return;
+            }
+            toast.success("User deleted");
             closeModal();
             fetchUsers();
         } catch (err) { console.error(err); }

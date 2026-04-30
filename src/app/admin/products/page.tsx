@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Package, Trash2, CheckCircle2, Clock, AlertCircle, Plus, Search, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
 import AdminLayout from "@/components/dashboard/AdminLayout";
 
 interface Product {
@@ -73,7 +74,9 @@ export default function ProductsPage() {
         const file = e.target.files?.[0];
         if (!file) return;
         if (file.size > 4 * 1024 * 1024) {
-            alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max 4MB.`);
+            toast.error("File too large", {
+                description: `${(file.size / 1024 / 1024).toFixed(1)}MB — maximum is 4MB.`,
+            });
             e.target.value = "";
             return;
         }
@@ -93,7 +96,7 @@ export default function ProductsPage() {
             setLastResult(result);
             fetchProducts();
         } catch (err: any) {
-            alert(`Import failed: ${err.message}`);
+            toast.error("Import failed", { description: err.message });
         } finally {
             setUploading(false);
             e.target.value = "";
@@ -110,7 +113,7 @@ export default function ProductsPage() {
             }
             fetchProducts();
         } catch (err: any) {
-            alert(`Failed to delete: ${err.message}`);
+            toast.error("Failed to delete product", { description: err.message });
         }
     };
 
@@ -124,7 +127,7 @@ export default function ProductsPage() {
             setLastResult(null);
             fetchProducts();
         } catch (err: any) {
-            alert(`Failed to delete all: ${err.message}`);
+            toast.error("Failed to delete catalog", { description: err.message });
         }
     };
 
