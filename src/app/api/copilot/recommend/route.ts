@@ -123,12 +123,14 @@ export async function POST(req: Request) {
     let emailSent = false;
     let emailError = null;
 
-    // Send email if requested
+    // Send email if requested. Top 3 products embedded as cards in the email
+    // body (matches the chat preview: title, price, image, link to Shopify).
     if (sendEmail && matches.length > 0) {
       const emailResult = await emailService.sendRecommendationEmail(
         customerEmail,
         customerName,
-        emailDraft
+        emailDraft,
+        matches.slice(0, 3)
       );
 
       emailSent = emailResult.success;

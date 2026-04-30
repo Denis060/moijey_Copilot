@@ -10,54 +10,152 @@ const getResendClient = () => {
   return new Resend(apiKey);
 };
 
+// Escape user-provided text before embedding it in HTML. Defensive — most fields
+// are plain text from the rep's form or AI output, but a stray `<` or `&` would
+// otherwise render or break the markup.
+function esc(s: string | null | undefined): string {
+  if (!s) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+interface CustomerEmailProduct {
+  title: string;
+  price: number | null;
+  price_display?: string | null;
+  image_url: string | null;
+  shopify_url: string | null;
+}
+
+// Render a single product card as table-based HTML — single column, image on top,
+// title + price + CTA below. Tables (not flex/grid) are required for Outlook compat.
+function renderProductCard(p: CustomerEmailProduct): string {
+  const url = p.shopify_url || "https://moijeydiamonds.com";
+  const priceText = p.price_display
+    ? esc(p.price_display)
+    : (p.price !== null ? `$${Number(p.price).toLocaleString()}` : "Price on request");
+
+  const imageBlock = p.image_url
+    ? `<tr>
+         <td style="padding: 0; line-height: 0;">
+           <a href="${esc(url)}" target="_blank" style="display:block;">
+             <img src="${esc(p.image_url)}" alt="${esc(p.title)}" width="600"
+                  style="display:block; width:100%; max-width:600px; height:auto; border:0; outline:none; text-decoration:none;" />
+           </a>
+         </td>
+       </tr>`
+    : "";
+
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="margin: 24px 0; border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background-color: #ffffff;">
+      ${imageBlock}
+      <tr>
+        <td style="padding: 22px 24px;">
+          <h3 style="margin: 0 0 8px 0; font-family: Georgia, 'Times New Roman', serif; font-size: 18px; line-height: 1.3; color: #020617;">
+            ${esc(p.title)}
+          </h3>
+          <p style="margin: 0 0 18px 0; font-family: Georgia, 'Times New Roman', serif; font-size: 17px; font-weight: bold; color: #d4af37; letter-spacing: 0.3px;">
+            ${priceText}
+          </p>
+          <a href="${esc(url)}" target="_blank"
+             style="display: inline-block; padding: 11px 22px; background-color: #020617; color: #d4af37; text-decoration: none; font-family: Arial, sans-serif; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; border-radius: 4px;">
+            View on Moijey Diamonds
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
 export const emailService = {
   /**
-   * Send recommendation email to customer
+   * Send recommendation email to customer with product cards (image, title, price,
+   * "View on Moijey Diamonds" button per product). The body text is the AI-generated
+   * narrative; cards reinforce by linking each piece directly to its Shopify page.
    */
   async sendRecommendationEmail(
     customerEmail: string,
     customerName: string,
-    emailBody: string
+    emailBody: string,
+    products: CustomerEmailProduct[] = []
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       const resend = getResendClient();
       const subject = `Your Personalized Jewelry Recommendations from Moijey`;
 
-      const htmlBody = `
-<!DOCTYPE html>
+      const bodyParagraphs = emailBody
+        .split(/\n+/)
+        .filter(line => line.trim().length > 0)
+        .map(line => `<p style="margin: 0 0 14px 0;">${esc(line)}</p>`)
+        .join("");
+
+      const productCards = products.slice(0, 3).map(renderProductCard).join("");
+      const productsSection = products.length > 0 ? `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 28px;">
+          <tr>
+            <td style="padding-bottom: 6px; border-bottom: 1px solid #d4af37;">
+              <p style="margin: 0; font-family: Arial, sans-serif; font-size: 11px; font-weight: bold; letter-spacing: 2px; color: #d4af37; text-transform: uppercase;">
+                Selected for You
+              </p>
+            </td>
+          </tr>
+        </table>
+        ${productCards}
+      ` : "";
+
+      const htmlBody = `<!DOCTYPE html>
 <html>
 <head>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { border-bottom: 2px solid #d4af37; padding-bottom: 20px; margin-bottom: 30px; }
-    .header h1 { color: #020617; margin: 0; font-size: 24px; }
-    .content { margin: 20px 0; }
-    .footer { border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px; font-size: 12px; color: #666; }
-    .product-link { color: #d4af37; text-decoration: none; font-weight: bold; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${esc(subject)}</title>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>✨ Your Personalized Jewelry Selection</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${customerName},</p>
-      ${emailBody.split("\n").map((line) => `<p>${line}</p>`).join("")}
-    </div>
-    <div class="footer">
-      <p>
-        <strong>Moijey Diamonds</strong><br/>
-        Luxury Jewelry | Premium Diamonds<br/>
-        <a href="https://moijeydiamonds.com" class="product-link">Visit Our Store</a>
-      </p>
-      <p>Questions? Reply to this email or contact our team directly.</p>
-    </div>
-  </div>
+<body style="margin: 0; padding: 0; background-color: #f5f5f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #333; line-height: 1.6;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f0;">
+    <tr>
+      <td align="center" style="padding: 28px 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 6px; overflow: hidden;">
+          <tr>
+            <td style="padding: 30px 32px 24px 32px; border-bottom: 2px solid #d4af37;">
+              <h1 style="margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: 24px; color: #020617; letter-spacing: 0.5px;">
+                Your Personalized Jewelry Selection
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 32px 8px 32px; font-size: 15px; color: #333;">
+              <p style="margin: 0 0 14px 0;">Dear ${esc(customerName)},</p>
+              ${bodyParagraphs}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 32px 32px 32px;">
+              ${productsSection}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 22px 32px; background-color: #020617; color: #d4af37; font-size: 12px; line-height: 1.6;">
+              <p style="margin: 0 0 6px 0; font-family: Georgia, 'Times New Roman', serif; font-size: 16px; color: #d4af37; letter-spacing: 0.5px;">
+                Moijey Diamonds
+              </p>
+              <p style="margin: 0 0 12px 0; color: #c8c8c8;">Luxury Jewelry · Premium Diamonds</p>
+              <a href="https://moijeydiamonds.com" style="color: #d4af37; text-decoration: none; font-weight: bold;">moijeydiamonds.com</a>
+              <p style="margin: 14px 0 0 0; color: #888; font-size: 11px;">
+                Questions? Reply to this email and our team will respond shortly.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
-</html>
-      `;
+</html>`;
 
       const response = await resend.emails.send({
         from: FROM_ADDRESS,
