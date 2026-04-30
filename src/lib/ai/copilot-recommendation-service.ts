@@ -188,7 +188,7 @@ Write a professional summary that a sales rep would use internally. Make it conc
         : "";
 
     const prompt = `
-You are a luxury jewelry sales specialist writing a personalized recommendation email.
+You are a luxury jewelry sales specialist writing the BODY ONLY of a personalized recommendation email. The greeting and signature are added separately by the system — do NOT write them yourself.
 
 Customer Details:
 - Name: ${input.customerName}
@@ -205,18 +205,29 @@ ${matchesText}
 
 ${customOrderText}
 
-Write a professional, warm, and personalized email (4-5 sentences) recommending these products. Be enthusiastic about the selections and make a personal touch. Do NOT include the [View Product] links in the email body - just write naturally.
-
-Format as plain text (no markdown formatting). End with the body of the email — DO NOT include a sign-off, signature, "Warmly", "Sincerely", "[Your Name]", or any closing line. The signature will be appended separately.
+STRICT OUTPUT RULES:
+1. Output the body paragraphs ONLY. 4-5 sentences total, plain text, no markdown.
+2. DO NOT write a "Subject:" line. DO NOT write any header.
+3. DO NOT start with "Dear ${input.customerName}," / "Hi ${input.customerName}," / "Hello," / any greeting. The system has already added the greeting above your output.
+4. DO NOT end with "Warmly,", "Sincerely,", "Best regards,", "[Your Name]", or any sign-off. The signature is appended separately.
+5. Speak directly to the customer in a warm, confident, luxury-professional tone. Be specific about the recommended pieces but do NOT include URLs — the cards are shown alongside.
+6. Start your response with the first sentence of body content. Nothing else.
 `;
 
-    const body = await aiService.generateAnswer(prompt);
+    const rawBody = await aiService.generateAnswer(prompt);
 
-    // Strip any closing the model added anyway, then append the canonical signature.
+    // Defensive cleanup — strip anything the model emitted despite the rules.
+    let cleaned = rawBody;
+    // Remove any leading "Subject: ..." line (and the blank line after it).
+    cleaned = cleaned.replace(/^\s*subject:[^\n]*\n+/i, "");
+    // Remove a leading greeting like "Dear X,", "Hi X,", "Hello X,", "Hey," — single line.
+    cleaned = cleaned.replace(/^\s*(dear|hi|hello|hey|greetings)\b[^\n]*\n+/i, "");
+    // Strip closings the model added anyway.
     const closingPattern = /\n+\s*(warmly|sincerely|best regards|kind regards|regards|yours truly|yours sincerely|best,|cheers|with warm regards|with regards)\b[\s\S]*$/i;
-    const cleanedBody = body.replace(closingPattern, "").trim();
+    cleaned = cleaned.replace(closingPattern, "").trim();
+
     const title = rep.title || "Moijey Diamond Specialist";
-    return `${cleanedBody}\n\nWarmly,\n\n${rep.name}\n${title}`;
+    return `${cleaned}\n\nWarmly,\n\n${rep.name}\n${title}`;
   },
 
   /**
