@@ -11,7 +11,32 @@ const CHUNK_LIMIT = 10;           // Retrieve up to 10, trim by score before bui
 const FALLBACK_CHUNKS = 3;        // If nothing passes threshold, include top N as best-effort
 const HISTORY_TURNS = 2;          // How many prior message pairs to include for multi-turn context
 const PRODUCT_LIMIT = 5;          // How many top product matches to retrieve from the live catalog
-const MIN_PRODUCT_SCORE = 0.25;   // Minimum cosine similarity for a product to be "matching"
+const MIN_PRODUCT_SCORE = 0.4;    // Cosine similarity floor for a product to surface — was 0.25, raised
+                                  // to 0.4 to suppress weak matches on unrelated queries (e.g. "who is our CEO?"
+                                  // would sometimes scrape past 0.25 against jewelry titles).
+
+/**
+ * Heuristic intent gate — only run product search when the question has clear
+ * jewelry-shopping signal. Saves an embedding + DB call on policy / FAQ / "who is X"
+ * questions, and prevents irrelevant product cards from showing up under unrelated answers.
+ *
+ * Errors on the side of false positives (run the search) when in doubt; the threshold
+ * above filters out weak matches as a second line of defense.
+ */
+const PRODUCT_INTENT_PATTERNS: RegExp[] = [
+    /\b(ring|necklace|bracelet|earring|earrings|pendant|band|mount|mounting|chain|brooch|charm)\b/i,
+    /\b(gold|silver|platinum|rhodium|titanium|tungsten)\b/i,
+    /\b(diamond|sapphire|emerald|ruby|pearl|gemstone|gem|aquamarine|amethyst|topaz|opal|garnet|moissanite)\b/i,
+    /\b(oval|round|princess|cushion|marquise|asscher|radiant|baguette|emerald-cut|pear-cut|heart-cut)\b/i,
+    /\b(eternity|halo|solitaire|pave|pavé|bezel|prong|cathedral|trellis|tension)\b/i,
+    /\b(carat|ctw|carats|\d+\s*ct\b)\b/i,
+    /\$\s*\d/,                                 // any dollar amount: "$5,000", "$5 000", etc.
+    /\b(budget|inventory|catalog|collection|in stock|under \$|over \$)\b/i,
+];
+
+function hasProductIntent(query: string): boolean {
+    return PRODUCT_INTENT_PATTERNS.some(p => p.test(query));
+}
 
 export type SuggestedProduct = ProductMatch;
 
@@ -65,13 +90,21 @@ export interface RetrievedContext {
  * embed, vector search across chunks + products, load business facts.
  */
 async function retrieve(query: string, workspaceId: string): Promise<RetrievedContext> {
+    // Intent gate: skip product search entirely when the query has no jewelry-shopping signal.
+    // Saves an embedding API call + a vector scan, and stops irrelevant product cards from
+    // appearing under non-product answers (e.g., "who is our CEO?", "warranty policy").
+    const productIntent = hasProductIntent(query);
+    const productsPromise = productIntent
+        ? vectorService.searchSimilarProducts(query, PRODUCT_LIMIT).catch(err => {
+            console.error("Product search failed (continuing without products):", err.message);
+            return [];
+        })
+        : Promise.resolve([]);
+
     const [chunks, facts, products] = await Promise.all([
         vectorService.searchSimilarChunks(query, workspaceId, CHUNK_LIMIT),
         getBusinessFacts(workspaceId),
-        vectorService.searchSimilarProducts(query, PRODUCT_LIMIT).catch(err => {
-            console.error("Product search failed (continuing without products):", err.message);
-            return [];
-        }),
+        productsPromise,
     ]);
     const aboveThreshold = chunks.filter(c => c.score >= MIN_SIMILARITY_SCORE);
     const relevantChunks = aboveThreshold.length > 0 ? aboveThreshold : chunks.slice(0, FALLBACK_CHUNKS);
@@ -103,7 +136,7 @@ async function retrieve(query: string, workspaceId: string): Promise<RetrievedCo
         }).join("\n")}\n`
         : "";
 
-    console.log(`RAG retrieve: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, products: ${relevantProducts.length}/${products.length})`);
+    console.log(`RAG retrieve: ${aboveThreshold.length}/${chunks.length} chunks passed threshold (using ${relevantChunks.length}${lowConfidence ? " fallback" : ""}, products: ${relevantProducts.length}/${products.length}${productIntent ? "" : " — skipped (no shopping intent)"})`);
 
     return {
         citations,
