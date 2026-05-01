@@ -60,7 +60,24 @@ export async function POST(req: Request) {
       timeline,
       notes,
       sendEmail,
-    } = body;
+      // Optional overrides supplied by the rep at send time:
+      emailDraftOverride,        // string — final email body the rep edited locally
+      selectedProductIds,        // string[] — subset of match IDs to include in the email
+    } = body as {
+      customerName: string;
+      customerEmail: string;
+      productType?: string;
+      budgetMin?: number | string;
+      budgetMax?: number | string;
+      diamondShape?: string;
+      metal?: string;
+      style?: string;
+      timeline?: string;
+      notes?: string;
+      sendEmail?: boolean;
+      emailDraftOverride?: string;
+      selectedProductIds?: string[];
+    };
 
     // Validate required fields
     if (!customerName || !customerEmail) {
@@ -70,67 +87,55 @@ export async function POST(req: Request) {
       );
     }
 
-    // Find matching products
-    const matches = await copilotRecommendationService.findMatches({
+    // Normalize budget once — UI sends strings, server treats them as numbers.
+    const toNum = (v: number | string | undefined): number | undefined => {
+      if (v === undefined || v === null || v === "") return undefined;
+      const n = typeof v === "number" ? v : parseFloat(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const recInput = {
       customerName,
       customerEmail,
       productType,
-      budgetMin: budgetMin ? parseFloat(budgetMin) : undefined,
-      budgetMax: budgetMax ? parseFloat(budgetMax) : undefined,
+      budgetMin: toNum(budgetMin),
+      budgetMax: toNum(budgetMax),
       diamondShape,
       metal,
       style,
       timeline,
       notes,
-    });
+    };
+
+    // Find matching products
+    const matches = await copilotRecommendationService.findMatches(recInput);
 
     // Generate internal summary
-    const internalSummary = await copilotRecommendationService.generateInternalSummary(
-      {
-        customerName,
-        customerEmail,
-        productType,
-        budgetMin: budgetMin ? parseFloat(budgetMin) : undefined,
-        budgetMax: budgetMax ? parseFloat(budgetMax) : undefined,
-        diamondShape,
-        metal,
-        style,
-        timeline,
-        notes,
-      },
-      matches
-    );
+    const internalSummary = await copilotRecommendationService.generateInternalSummary(recInput, matches);
 
     // Generate customer email — sign it with the logged-in rep's derived name.
     const repName = deriveRepName(session.user.email);
-    const emailDraft = await copilotRecommendationService.generateCustomerEmail(
-      {
-        customerName,
-        customerEmail,
-        productType,
-        budgetMin: budgetMin ? parseFloat(budgetMin) : undefined,
-        budgetMax: budgetMax ? parseFloat(budgetMax) : undefined,
-        diamondShape,
-        metal,
-        style,
-        timeline,
-        notes,
-      },
-      matches,
-      { name: repName }
-    );
+    const emailDraft = await copilotRecommendationService.generateCustomerEmail(recInput, matches, { name: repName });
 
     let emailSent = false;
     let emailError = null;
 
-    // Send email if requested. Top 3 products embedded as cards in the email
-    // body (matches the chat preview: title, price, image, link to Shopify).
-    if (sendEmail && matches.length > 0) {
+    // Honor rep edits at send time:
+    //   - emailDraftOverride: rep tweaked the draft locally; send their version verbatim
+    //   - selectedProductIds: rep curated which matches go in the email cards
+    // Falls back to the freshly-generated draft + top-3 matches when no overrides given.
+    const finalProducts = (Array.isArray(selectedProductIds) && selectedProductIds.length > 0)
+      ? matches.filter(m => selectedProductIds.includes(m.id))
+      : matches.slice(0, 3);
+    const finalDraft = (typeof emailDraftOverride === "string" && emailDraftOverride.trim().length > 0)
+      ? emailDraftOverride
+      : emailDraft;
+
+    if (sendEmail && finalProducts.length > 0) {
       const emailResult = await emailService.sendRecommendationEmail(
         customerEmail,
         customerName,
-        emailDraft,
-        matches.slice(0, 3)
+        finalDraft,
+        finalProducts
       );
 
       emailSent = emailResult.success;
@@ -139,24 +144,14 @@ export async function POST(req: Request) {
       }
     }
 
-    // Save recommendation to database
+    // Save recommendation to database. Persist what the customer ACTUALLY received:
+    // the curated subset of products + the rep's edited draft (when those were used).
     await copilotRecommendationService.saveRecommendation(
       user.id,
       user.workspace_id,
-      {
-        customerName,
-        customerEmail,
-        productType,
-        budgetMin: budgetMin ? parseFloat(budgetMin) : undefined,
-        budgetMax: budgetMax ? parseFloat(budgetMax) : undefined,
-        diamondShape,
-        metal,
-        style,
-        timeline,
-        notes,
-      },
-      matches,
-      emailDraft,
+      recInput,
+      sendEmail ? finalProducts : matches,
+      sendEmail ? finalDraft : emailDraft,
       emailSent
     );
 

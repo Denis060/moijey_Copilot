@@ -11,9 +11,13 @@ const CHUNK_LIMIT = 10;           // Retrieve up to 10, trim by score before bui
 const FALLBACK_CHUNKS = 3;        // If nothing passes threshold, include top N as best-effort
 const HISTORY_TURNS = 2;          // How many prior message pairs to include for multi-turn context
 const PRODUCT_LIMIT = 5;          // How many top product matches to retrieve from the live catalog
-const MIN_PRODUCT_SCORE = 0.4;    // Cosine similarity floor for a product to surface — was 0.25, raised
-                                  // to 0.4 to suppress weak matches on unrelated queries (e.g. "who is our CEO?"
-                                  // would sometimes scrape past 0.25 against jewelry titles).
+const MIN_PRODUCT_SCORE = 0.6;    // Cosine similarity floor for a product to surface. History:
+                                  //   0.25 → 0.4 (CEO-question noise)
+                                  //   0.4  → 0.6 (Andy reported "what month does Emerald represent?"
+                                  //               still surfaced product cards because the embedding
+                                  //               clipped past 0.4 against jewelry titles containing
+                                  //               "emerald"). 0.6 forces a much stronger semantic
+                                  //               match before products show up.
 
 /**
  * Heuristic intent gate — only run product search when the question has clear

@@ -791,13 +791,20 @@ export default function ChatInterface() {
         }
     };
 
-    // Open the rep's default mail client with the answer pre-filled. No server roundtrip,
-    // and the rep keeps full control over recipient + tweaks before sending.
+    // Open Gmail's compose window in a new tab with the answer pre-filled.
+    // We avoid the OS-level mailto: handler because Windows pops a "choose an app"
+    // dialog when no email client is configured (Andy hit this on Monday demo).
+    // Nearly the entire Moijey team uses Gmail, so going there directly is the
+    // right tradeoff. Falls back to mailto only if window.open is blocked.
     const handleEmailMessage = (content: string) => {
         const body = parseContent(content).text;
         const subject = "From Moijey Diamonds";
-        const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.location.href = url;
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        const opened = window.open(gmailUrl, "_blank", "noopener,noreferrer");
+        if (!opened) {
+            // Popup blocked — fall back to mailto so the action still does something.
+            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        }
     };
 
     /**

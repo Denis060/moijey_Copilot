@@ -188,7 +188,7 @@ Write a professional summary that a sales rep would use internally. Make it conc
         : "";
 
     const prompt = `
-You are a luxury jewelry sales specialist writing the BODY ONLY of a personalized recommendation email. The greeting and signature are added separately by the system — do NOT write them yourself.
+You are a trusted luxury jewelry advisor at Moijey Diamonds writing the BODY ONLY of a follow-up email to a customer the rep has ALREADY had a real conversation with (in person, by phone, or virtually). The greeting and signature are added separately by the system — do NOT write them yourself.
 
 Customer Details:
 - Name: ${input.customerName}
@@ -206,12 +206,15 @@ ${matchesText}
 ${customOrderText}
 
 STRICT OUTPUT RULES:
-1. Output the body paragraphs ONLY. 4-5 sentences total, plain text, no markdown.
+1. Output the body paragraphs ONLY. 3-4 short sentences total, plain text, no markdown.
 2. DO NOT write a "Subject:" line. DO NOT write any header.
 3. DO NOT start with "Dear ${input.customerName}," / "Hi ${input.customerName}," / "Hello," / any greeting. The system has already added the greeting above your output.
 4. DO NOT end with "Warmly,", "Sincerely,", "Best regards,", "[Your Name]", or any sign-off. The signature is appended separately.
-5. Speak directly to the customer in a warm, confident, luxury-professional tone. Be specific about the recommended pieces but do NOT include URLs — the cards are shown alongside.
-6. Start your response with the first sentence of body content. Nothing else.
+5. The rep ALREADY spoke with this customer — never open with "It was a pleasure discussing", "Thank you for visiting", "I enjoyed working with you", "It was wonderful meeting you", "Following up on our conversation", or any variation. The email should feel like a continuation, not a re-introduction.
+6. Tone: confident, advisor-like, warm but DIRECT. Like a trusted specialist who knows their craft. Use phrases like "I'm confident this will [resonate / suit them / land well]", "based on what you shared", "I think this one in particular...". Avoid breathless adjectives ("absolutely delighted", "truly excited", "magnificent").
+7. Be specific about the recommended pieces — call out one as the standout if it's clearly the best fit, mention the others briefly as alternatives. Never paste URLs (the UI shows the cards alongside).
+8. Open with the recommendation itself or a one-line acknowledgment, not pleasantries. Example openings: "Based on what you shared today, the [Title] feels like the strongest fit." or "I've put together two options I think you'll love."
+9. Start your response with the first sentence of body content. Nothing else.
 `;
 
     const rawBody = await aiService.generateAnswer(prompt);
@@ -222,6 +225,12 @@ STRICT OUTPUT RULES:
     cleaned = cleaned.replace(/^\s*subject:[^\n]*\n+/i, "");
     // Remove a leading greeting like "Dear X,", "Hi X,", "Hello X,", "Hey," — single line.
     cleaned = cleaned.replace(/^\s*(dear|hi|hello|hey|greetings)\b[^\n]*\n+/i, "");
+    // Strip a redundant first-meeting opener if the model ignored rule #5. Only the very
+    // first sentence — these are the exact templated openings reps complained about.
+    cleaned = cleaned.replace(
+        /^[^.!?\n]*\b(it was (such )?(a )?pleasure (discussing|meeting|chatting|talking)|thank you for (visiting|stopping by|coming in|the lovely conversation)|(I (really )?enjoyed|so glad I got to|loved) (working with|meeting|chatting with|speaking with))\b[^.!?]*[.!?]\s*/i,
+        ""
+    ).trim();
     // Strip closings the model added anyway.
     const closingPattern = /\n+\s*(warmly|sincerely|best regards|kind regards|regards|yours truly|yours sincerely|best,|cheers|with warm regards|with regards)\b[\s\S]*$/i;
     cleaned = cleaned.replace(closingPattern, "").trim();
