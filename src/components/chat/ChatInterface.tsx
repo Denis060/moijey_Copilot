@@ -35,6 +35,8 @@ import {
     Search,
     Archive,
     ArchiveRestore,
+    ThumbsUp,
+    ThumbsDown,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -64,6 +66,7 @@ interface SuggestedProduct {
 }
 
 interface Message {
+    id?: string;                              // Set after streaming completes (from `done` SSE event) or on load
     role: "user" | "assistant";
     content: string;
     citations?: Citation[];
@@ -71,6 +74,7 @@ interface Message {
     suggestions?: string[];
     lowConfidence?: boolean;
     aborted?: boolean;
+    feedback?: "up" | "down" | null;          // Rep's vote on this answer (only meaningful for assistant role)
 }
 
 interface Conversation {
@@ -360,7 +364,8 @@ function SidebarContent({
                                                                         {conv.title || "Untitled"}
                                                                     </span>
                                                                 </button>
-                                                                <div className="flex items-center shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                                                                {/* Always visible on touch devices (no hover); fades in on hover for desktop. */}
+                                                                <div className="flex items-center shrink-0 opacity-60 lg:opacity-0 lg:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                                                                     {!showArchived && (
                                                                         <button
                                                                             onClick={e => { e.stopPropagation(); onStartRename(conv.id, conv.title || ""); }}
@@ -598,10 +603,12 @@ export default function ChatInterface() {
             const data = await res.json();
             if (Array.isArray(data)) {
                 setMessages(data.map((m: any) => ({
+                    id: m.id,
                     role: m.role,
                     content: m.content,
                     citations: m.citations ?? [],
                     products: m.products ?? [],
+                    feedback: m.feedback === 1 ? "up" : m.feedback === -1 ? "down" : null,
                 })));
                 setConversationId(conv.id);
                 setSavedIdxSet(new Set());
@@ -715,6 +722,18 @@ export default function ChatInterface() {
                             });
                         }
 
+                    } else if (event.type === "done") {
+                        // Server inserts the assistant message after streaming completes and
+                        // sends back the row id so we can attach feedback to the just-rendered bubble.
+                        if (event.messageId) {
+                            setMessages(prev => {
+                                const last = prev[prev.length - 1];
+                                if (last?.role === "assistant" && !last.id) {
+                                    return [...prev.slice(0, -1), { ...last, id: event.messageId as string }];
+                                }
+                                return prev;
+                            });
+                        }
                     } else if (event.type === "error") {
                         setLoading(false);
                         setMessages(prev => [...prev, { role: "assistant", content: event.message || "An error occurred." }]);
@@ -779,6 +798,33 @@ export default function ChatInterface() {
         const subject = "From Moijey Diamonds";
         const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         window.location.href = url;
+    };
+
+    /**
+     * Toggle the rep's thumbs-up/down on an answer. Clicking the same vote again clears it.
+     * Optimistic — flips local state first, rolls back on server failure.
+     */
+    const handleFeedback = async (idx: number, vote: "up" | "down") => {
+        const msg = messages[idx];
+        if (!msg?.id || msg.role !== "assistant") return;
+        const next = msg.feedback === vote ? null : vote;
+        const previous = msg.feedback ?? null;
+
+        setMessages(prev => prev.map((m, i) => i === idx ? { ...m, feedback: next } : m));
+
+        try {
+            const res = await fetch(`/api/messages/${msg.id}/feedback`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vote: next }),
+            });
+            if (!res.ok) throw new Error("Feedback save failed");
+        } catch (err: any) {
+            console.error("Feedback failed:", err);
+            // Roll back the optimistic update so the UI stays honest.
+            setMessages(prev => prev.map((m, i) => i === idx ? { ...m, feedback: previous } : m));
+            toast.error("Couldn't record feedback", { description: "Please try again." });
+        }
     };
 
     const handleSaveResponse = async (idx: number) => {
@@ -1003,12 +1049,15 @@ export default function ChatInterface() {
         }
     };
 
+    // Curated to demo both modes for new reps: the first three exercise the KB
+    // (warranty, Gemshield insurance, rhodium plating — all in our uploaded docs),
+    // the fourth triggers product retrieval, the fifth shows the custom-design pitch.
     const quickFaqs = [
-        "Warranty policy?",
-        "Ethical sourcing statement",
-        "Shipping time to New York",
-        "Financing options",
-        "Custom ring process",
+        "What does our warranty cover?",
+        "Tell me about Gemshield insurance",
+        "How does rhodium replating work?",
+        "Show me yellow gold bands under $2,000",
+        "Walk me through a custom design",
     ];
 
     // Filter by search before grouping so empty groups disappear automatically.
@@ -1225,6 +1274,31 @@ export default function ChatInterface() {
                                                 </button>
                                             ))}
                                             <div className="ml-auto flex items-center gap-1">
+                                                {/* Thumbs up/down — only enabled once the message has an id (after stream completes). */}
+                                                <button
+                                                    onClick={() => handleFeedback(idx, "up")}
+                                                    disabled={!m.id}
+                                                    title={m.feedback === "up" ? "Remove thumbs up" : "Mark this answer helpful"}
+                                                    className={`p-1.5 rounded-full text-[10px] font-medium transition-all border disabled:opacity-40 disabled:cursor-default ${
+                                                        m.feedback === "up"
+                                                            ? "bg-green-500/15 border-green-500/40 text-green-400"
+                                                            : "border-border/40 text-muted hover:border-green-500/40 hover:text-green-400 hover:bg-green-500/5"
+                                                    }`}
+                                                >
+                                                    <ThumbsUp className="w-3 h-3" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleFeedback(idx, "down")}
+                                                    disabled={!m.id}
+                                                    title={m.feedback === "down" ? "Remove thumbs down" : "Mark this answer unhelpful"}
+                                                    className={`p-1.5 rounded-full text-[10px] font-medium transition-all border disabled:opacity-40 disabled:cursor-default ${
+                                                        m.feedback === "down"
+                                                            ? "bg-red-500/15 border-red-500/40 text-red-400"
+                                                            : "border-border/40 text-muted hover:border-red-500/40 hover:text-red-400 hover:bg-red-500/5"
+                                                    }`}
+                                                >
+                                                    <ThumbsDown className="w-3 h-3" />
+                                                </button>
                                                 <button
                                                     onClick={() => handleCopyMessage(idx, m.content)}
                                                     title="Copy answer"

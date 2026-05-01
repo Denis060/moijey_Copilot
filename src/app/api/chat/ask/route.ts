@@ -33,6 +33,12 @@ export async function POST(req: Request) {
         await db.query(
             `ALTER TABLE messages ADD COLUMN IF NOT EXISTS low_confidence BOOLEAN DEFAULT FALSE`
         ).catch(err => console.warn("messages.low_confidence schema add warn:", err.message));
+        await db.query(
+            `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback SMALLINT`
+        ).catch(err => console.warn("messages.feedback schema add warn:", err.message));
+        await db.query(
+            `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`
+        ).catch(err => console.warn("messages.feedback_at schema add warn:", err.message));
 
         // 1. Run retrieval (embedding + chunks + facts + products), history-load, and
         //    conversation upsert all in parallel. The retrieval doesn't actually need
@@ -81,18 +87,22 @@ export async function POST(req: Request) {
                 const latency = Date.now() - startTime;
 
                 // Save assistant message + audit log after stream completes.
-                // low_confidence is persisted so we can compute the verify-rate metric on the insights page.
-                await db.query(
-                    "INSERT INTO messages (conversation_id, role, content, citations, products, low_confidence, latency_ms, model_used) VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7)",
+                // RETURNING id so we can send the new row's id back to the client — needed
+                // for the thumbs-up/down feedback feature (front-end POSTs to that id).
+                const insert = await db.query(
+                    `INSERT INTO messages (conversation_id, role, content, citations, products, low_confidence, latency_ms, model_used)
+                     VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7) RETURNING id`,
                     [convId, fullAnswer, JSON.stringify(citations), JSON.stringify(products), lowConfidence, latency, model]
                 );
+                const messageId = insert.rows[0]?.id as string | undefined;
+
                 db.query(
                     "INSERT INTO audit_logs (workspace_id, user_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)",
                     [workspaceId, userId, "ASK_QUESTION", "conversation", convId,
                      JSON.stringify({ query_length: query.length, citations_count: citations.length, latency_ms: latency })]
                 ).catch((err: Error) => console.error("Audit log failed:", err.message));
 
-                controller.enqueue(ev({ type: "done" }));
+                controller.enqueue(ev({ type: "done", messageId }));
                 controller.close();
             }
         });

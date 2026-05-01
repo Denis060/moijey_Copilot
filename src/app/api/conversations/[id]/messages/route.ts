@@ -21,15 +21,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    // Idempotent: make sure the products column exists before SELECTing it.
-    // Same one-time ALTER pattern used in /api/chat/ask and /api/knowledge/upload.
+    // Idempotent: make sure the columns added after launch exist before SELECTing them.
+    // Same pattern used in /api/chat/ask and /api/knowledge/upload.
     await db.query(
         `ALTER TABLE messages ADD COLUMN IF NOT EXISTS products JSONB DEFAULT '[]'`
     ).catch(err => console.warn("messages.products schema add warn:", err.message));
+    await db.query(
+        `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback SMALLINT`
+    ).catch(err => console.warn("messages.feedback schema add warn:", err.message));
 
-    // products column was added later — coalesce missing values to empty array so old rows still load.
     const messages = await db.query(
-        `SELECT id, role, content, citations, COALESCE(products, '[]'::jsonb) AS products, created_at
+        `SELECT id, role, content, citations,
+                COALESCE(products, '[]'::jsonb) AS products,
+                feedback,
+                created_at
          FROM messages
          WHERE conversation_id = $1
          ORDER BY created_at ASC`,
