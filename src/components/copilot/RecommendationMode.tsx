@@ -167,8 +167,12 @@ export default function RecommendationMode() {
     return (
         <div className="h-full flex flex-col">
             {!result ? (
-                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8">
-                    <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
+                // Form column splits into a scrollable body + a sticky CTA footer below,
+                // so the "Generate" button is always visible without the rep scrolling
+                // hunting for it.
+                <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8">
+                        <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
 
                         {/* Hero */}
                         <div className="space-y-3">
@@ -299,25 +303,30 @@ export default function RecommendationMode() {
                                 <p className="wrap-break-word">{error}</p>
                             </div>
                         )}
+                        </div>
+                    </div>
 
-                        {/* Submit */}
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-accent text-background font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-60 disabled:scale-100 disabled:cursor-not-allowed"
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    Generating recommendation...
-                                </>
-                            ) : (
-                                <>
-                                    <Wand2 className="w-5 h-5" />
-                                    Generate Recommendation
-                                </>
-                            )}
-                        </button>
+                    {/* Sticky CTA footer — always in view, never hunting for it. */}
+                    <div className="border-t border-border/40 bg-background/90 backdrop-blur-md p-4 lg:px-8 lg:py-5 shrink-0">
+                        <div className="max-w-3xl mx-auto">
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-accent text-background font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-60 disabled:scale-100 disabled:cursor-not-allowed shadow-lg shadow-accent/20"
+                            >
+                                {loading ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 animate-spin" />
+                                        Generating recommendation...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Wand2 className="w-5 h-5" />
+                                        Generate Recommendation
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </form>
             ) : (
