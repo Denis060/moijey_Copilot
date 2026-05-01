@@ -114,9 +114,9 @@ export default function ManagerPage() {
                                     <div key={i} className="px-6 py-3">
                                         <p className="text-xs text-foreground/80 leading-relaxed line-clamp-2">{q.content}</p>
                                         <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-[10px] text-muted">{q.rep_email}</span>
-                                            <span className="text-muted/40 text-[10px]">·</span>
-                                            <span className="text-[10px] text-muted">{relativeTime(q.created_at)}</span>
+                                            <span className="text-[11px] text-muted">{q.rep_email}</span>
+                                            <span className="text-muted/40 text-[11px]">·</span>
+                                            <span className="text-[11px] text-muted">{relativeTime(q.created_at)}</span>
                                         </div>
                                     </div>
                                 ))}

@@ -439,7 +439,7 @@ export default function RecommendationMode() {
                         {result.matches.length > 0 && (
                             <div className="space-y-3">
                                 <div className="flex items-baseline justify-between gap-3">
-                                    <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">Top Matches</p>
+                                    <p className="text-[10px] uppercase tracking-widest text-muted font-bold">Top Matches</p>
                                     <p className="text-[10px] text-muted">
                                         <span className="text-foreground font-semibold">{selectedIds.size}</span> selected for email
                                     </p>
@@ -497,7 +497,7 @@ export default function RecommendationMode() {
                                         </motion.label>
                                     );
                                 })}
-                                <p className="text-[11px] text-muted/70 italic px-1">
+                                <p className="text-[11px] text-muted italic px-1">
                                     Tip: uncheck any pieces you don&apos;t want in the email. The rep often knows the standout — one strong recommendation lands better than three competing options.
                                 </p>
                             </div>
@@ -559,7 +559,7 @@ export default function RecommendationMode() {
                                         rows={Math.min(14, Math.max(6, (editedDraft ?? result.emailDraft).split("\n").length + 1))}
                                         className="w-full bg-background/40 border border-border/40 rounded-xl px-4 py-3 text-[13px] text-foreground/90 leading-relaxed font-sans focus:outline-none focus:border-accent/50 resize-y"
                                     />
-                                    <p className="text-[11px] text-muted/70 italic px-1">
+                                    <p className="text-[11px] text-muted italic px-1">
                                         Edit anything you&apos;d like — your version is what the customer receives. The greeting and signature are added automatically.
                                     </p>
                                 </div>
@@ -654,8 +654,8 @@ function FormSection({ label, hint, children }: { label: React.ReactNode; hint?:
     return (
         <div className="space-y-3">
             <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">{label}</p>
-                {hint && <p className="text-[11px] text-muted/60 mt-0.5">{hint}</p>}
+                <p className="text-[10px] uppercase tracking-widest text-muted font-bold">{label}</p>
+                {hint && <p className="text-[11px] text-muted mt-0.5">{hint}</p>}
             </div>
             {children}
         </div>
@@ -708,7 +708,7 @@ function Card({ label, children }: { label: string; children: React.ReactNode })
             animate={{ opacity: 1, y: 0 }}
             className="rounded-2xl bg-surface/20 border border-border/50 p-4 lg:p-5 space-y-2"
         >
-            <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">{label}</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted font-bold">{label}</p>
             {children}
         </motion.div>
     );

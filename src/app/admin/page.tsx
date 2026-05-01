@@ -156,7 +156,7 @@ export default function InsightsPage() {
                                 <EmptyRow>No team activity yet this week.</EmptyRow>
                             ) : (
                                 <div className="divide-y divide-border/30">
-                                    <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-muted/70">
+                                    <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-muted">
                                         <span>Rep</span>
                                         <span>Convos</span>
                                         <span>Recs</span>
@@ -229,7 +229,7 @@ export default function InsightsPage() {
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="space-y-3">
-            <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted/70">{label}</h2>
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted">{label}</h2>
             {children}
         </div>
     );
@@ -242,7 +242,7 @@ function MetricCard({ title, value, sub, icon, color }: { title: string; value: 
             <div>
                 <p className={`text-2xl lg:text-3xl font-serif ${color}`}>{value.toLocaleString()}</p>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-muted mt-0.5">{title}</p>
-                <p className="text-[11px] text-muted/70 mt-0.5">{sub}</p>
+                <p className="text-[11px] text-muted mt-0.5">{sub}</p>
             </div>
         </div>
     );
@@ -258,7 +258,7 @@ function TrendCard({ title, value, sub, delta, icon, color }: { title: string; v
             <div>
                 <p className={`text-3xl lg:text-4xl font-serif ${color}`}>{value.toLocaleString()}</p>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-muted mt-1">{title}</p>
-                <p className="text-[11px] text-muted/70 mt-0.5">{sub}</p>
+                <p className="text-[11px] text-muted mt-0.5">{sub}</p>
             </div>
         </div>
     );
@@ -284,15 +284,15 @@ function ConfidenceCard({ count, total, ratePct }: { count: number; total: numbe
             <div>
                 <p className={`text-3xl lg:text-4xl font-serif ${color}`}>{ratePct}%</p>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-muted mt-1">Low-Confidence Answers</p>
-                <p className="text-[11px] text-muted/70 mt-0.5">{count} of {total} in last 30 days</p>
+                <p className="text-[11px] text-muted mt-0.5">{count} of {total} in last 30 days</p>
             </div>
         </div>
     );
 }
 
 function DeltaPill({ delta }: { delta: number | null }) {
-    if (delta === null) return <span className="text-[10px] text-muted/50">—</span>;
-    if (delta === 0) return <span className="text-[10px] text-muted/60 font-semibold">flat</span>;
+    if (delta === null) return <span className="text-[11px] text-muted">—</span>;
+    if (delta === 0) return <span className="text-[11px] text-muted font-semibold">flat</span>;
     const positive = delta > 0;
     return (
         <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-tighter px-2 py-0.5 rounded-full border ${
@@ -345,7 +345,7 @@ function ActivityItem({ log }: { log: ActivityRow }) {
                     <p className="text-sm font-medium truncate">{label}</p>
                     <p className="text-xs text-muted truncate">
                         <span className="text-foreground/70">{log.user_email || "system"}</span>
-                        {detail && <span className="text-muted/60"> · {detail}</span>}
+                        {detail && <span className="text-muted"> · {detail}</span>}
                     </p>
                 </div>
             </div>

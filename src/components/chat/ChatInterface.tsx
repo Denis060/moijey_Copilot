@@ -320,17 +320,17 @@ function SidebarContent({
                             {hasSearch ? (
                                 <>
                                     <p className="text-xs text-muted">No matches.</p>
-                                    <p className="text-[10px] text-muted/60 mt-1">Try a different search.</p>
+                                    <p className="text-[11px] text-muted mt-1">Try a different search.</p>
                                 </>
                             ) : showArchived ? (
                                 <>
                                     <p className="text-xs text-muted">No archived consultations.</p>
-                                    <p className="text-[10px] text-muted/60 mt-1">Archive a thread to hide it from your sidebar.</p>
+                                    <p className="text-[11px] text-muted mt-1">Archive a thread to hide it from your sidebar.</p>
                                 </>
                             ) : (
                                 <>
                                     <p className="text-xs text-muted">No consultations yet.</p>
-                                    <p className="text-[10px] text-muted/60 mt-1">Ask your first question below.</p>
+                                    <p className="text-[11px] text-muted mt-1">Ask your first question below.</p>
                                 </>
                             )}
                         </div>
@@ -391,10 +391,10 @@ function SidebarContent({
                                                     </div>
                                                     {!isRenaming && (
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-muted/60">{relativeTime(conv.last_message_at ?? conv.created_at)}</span>
+                                                            <span className="text-[11px] text-muted">{relativeTime(conv.last_message_at ?? conv.created_at)}</span>
                                                             {conv.message_count > 0 && (<>
-                                                                <span className="text-muted/30 text-[10px]">·</span>
-                                                                <span className="text-[10px] text-muted/60">{conv.message_count} {conv.message_count === 1 ? "msg" : "msgs"}</span>
+                                                                <span className="text-muted/40 text-[11px]">·</span>
+                                                                <span className="text-[11px] text-muted">{conv.message_count} {conv.message_count === 1 ? "msg" : "msgs"}</span>
                                                             </>)}
                                                             {showArchived && (
                                                                 <>
@@ -442,7 +442,7 @@ function SidebarContent({
                     </div>
                     {savedResponses.length === 0 ? (
                         <div className="px-4 py-4 text-center">
-                            <p className="text-[10px] text-muted/60">Tap <Bookmark className="w-3 h-3 inline" /> on any AI response to save it here.</p>
+                            <p className="text-[11px] text-muted">Tap <Bookmark className="w-3 h-3 inline" /> on any AI response to save it here.</p>
                         </div>
                     ) : (
                         <div className="space-y-1 px-3">
@@ -452,7 +452,7 @@ function SidebarContent({
                                         className="w-full text-left px-3 py-2.5 flex items-start justify-between gap-2 group cursor-pointer">
                                         <div className="min-w-0">
                                             <p className="text-xs font-medium text-foreground/80 truncate group-hover:text-foreground">{saved.title}</p>
-                                            <p className="text-[10px] text-muted/60 mt-0.5">{relativeTime(saved.created_at)}</p>
+                                            <p className="text-[11px] text-muted mt-0.5">{relativeTime(saved.created_at)}</p>
                                         </div>
                                         <div className="flex items-center gap-1 shrink-0">
                                             <button onClick={e => { e.stopPropagation(); onDeleteSaved(saved.id); }}

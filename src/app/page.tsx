@@ -75,7 +75,7 @@ export default function Home() {
                             See how it works
                         </a>
                     </div>
-                    <p className="text-[11px] text-muted/60 mt-6 uppercase tracking-widest">
+                    <p className="text-[11px] text-muted mt-6 uppercase tracking-widest">
                         Internal tool · Moijey staff access only
                     </p>
                 </section>

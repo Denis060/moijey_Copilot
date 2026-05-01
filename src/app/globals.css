@@ -6,7 +6,13 @@
   --accent: #d4af37;     /* Moijey Gold */
   --accent-foreground: #020617;
   --surface: #1e293b;    /* Deep Slate */
-  --muted: #64748b;
+  /* Muted bumped from #64748b (slate-500) → #94a3b8 (slate-400) for readability.
+     The old value sat right at the AA contrast threshold against the obsidian
+     background, and we use text-muted with opacity reductions in many places —
+     those compounded into very-low-contrast hint text. The lighter value gives
+     full-strength muted text comfortable contrast and keeps opacity-reduced uses
+     (text-muted/70 etc.) above the AA floor. */
+  --muted: #94a3b8;
   --border: #334155;
 }
 
