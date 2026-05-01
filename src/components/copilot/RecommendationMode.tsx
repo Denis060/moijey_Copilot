@@ -188,7 +188,10 @@ export default function RecommendationMode() {
     };
 
     return (
-        <div className="h-full flex flex-col">
+        // flex-1 + min-h-0 instead of h-full so this fills the remaining vertical
+        // space inside <main>'s flex column. With h-full the outer div had no
+        // bounded height and the sticky footer collapsed off-screen.
+        <div className="flex-1 flex flex-col min-h-0">
             {!result ? (
                 // Form column splits into a scrollable body + a sticky CTA footer below,
                 // so the "Generate" button is always visible without the rep scrolling
