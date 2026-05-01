@@ -2,511 +2,548 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Send, Loader2, Package, AlertCircle } from "lucide-react";
+import {
+    Send, Loader2, Package, AlertCircle, User, Mail,
+    Gem, Diamond, Sparkles, Wallet, Calendar, FileText,
+    Wand2, ChevronDown, CheckCircle2, ExternalLink, Copy as CopyIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface RecommendationFormData {
-  customerName: string;
-  customerEmail: string;
-  productType: string;
-  budgetMin: string;
-  budgetMax: string;
-  diamondShape: string;
-  metal: string;
-  style: string;
-  timeline: string;
-  notes: string;
-  sendEmail: boolean;
+    customerName: string;
+    customerEmail: string;
+    productType: string;
+    budgetMin: string;
+    budgetMax: string;
+    diamondShape: string;
+    metal: string;
+    style: string;
+    timeline: string;
+    notes: string;
+    sendEmail: boolean;
 }
 
 interface Match {
-  id: string;
-  title: string;
-  price: number;
-  image_url: string;
-  diamond_shape: string;
-  metal: string;
-  style: string;
-  shopify_url: string;
+    id: string;
+    title: string;
+    price: number;
+    image_url: string;
+    diamond_shape: string;
+    metal: string;
+    style: string;
+    shopify_url: string;
 }
 
 interface RecommendationResult {
-  customerName: string;
-  matches: Match[];
-  internalSummary: string;
-  emailDraft: string;
-  emailSent: boolean;
-  emailError?: string | null;
-  customOrderSuggested: boolean;
+    customerName: string;
+    matches: Match[];
+    internalSummary: string;
+    emailDraft: string;
+    emailSent: boolean;
+    emailError?: string | null;
+    customOrderSuggested: boolean;
 }
 
+const PRODUCT_TYPES = [
+    { value: "engagement ring", label: "Engagement Ring" },
+    { value: "wedding band", label: "Wedding Band" },
+    { value: "bracelet", label: "Bracelet" },
+    { value: "necklace", label: "Necklace" },
+    { value: "pendant", label: "Pendant" },
+    { value: "earrings", label: "Earrings" },
+    { value: "other", label: "Other" },
+];
+
+const DIAMOND_SHAPES = [
+    "round", "oval", "emerald", "cushion", "asscher",
+    "marquise", "radiant", "princess", "pear", "heart",
+];
+
+const METALS = [
+    { value: "white gold", label: "White Gold" },
+    { value: "yellow gold", label: "Yellow Gold" },
+    { value: "rose gold", label: "Rose Gold" },
+    { value: "platinum", label: "Platinum" },
+    { value: "sterling silver", label: "Sterling Silver" },
+];
+
+const STYLES = ["classic", "modern", "vintage", "contemporary", "halo", "solitaire", "eternity"];
+
+const TIMELINES = [
+    { value: "within 2 weeks", label: "Within 2 weeks" },
+    { value: "within 1 month", label: "Within 1 month" },
+    { value: "within 3 months", label: "Within 3 months" },
+    { value: "flexible", label: "Flexible" },
+];
+
 export default function RecommendationMode() {
-  const [formData, setFormData] = useState<RecommendationFormData>({
-    customerName: "",
-    customerEmail: "",
-    productType: "engagement ring",
-    budgetMin: "",
-    budgetMax: "",
-    diamondShape: "",
-    metal: "",
-    style: "",
-    timeline: "",
-    notes: "",
-    sendEmail: false,
-  });
+    const [formData, setFormData] = useState<RecommendationFormData>({
+        customerName: "",
+        customerEmail: "",
+        productType: "engagement ring",
+        budgetMin: "",
+        budgetMax: "",
+        diamondShape: "",
+        metal: "",
+        style: "",
+        timeline: "",
+        notes: "",
+        sendEmail: false,
+    });
 
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<RecommendationResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showDraft, setShowDraft] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState<RecommendationResult | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [showDraft, setShowDraft] = useState(false);
 
-  const handleInputChange = (
-    field: keyof RecommendationFormData,
-    value: any
-  ) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
+    const handleInputChange = (field: keyof RecommendationFormData, value: any) => {
+        setFormData(prev => ({ ...prev, [field]: value }));
+    };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
 
-    try {
-      const response = await fetch("/api/copilot/recommend", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...formData,
-          budgetMin: formData.budgetMin ? parseFloat(formData.budgetMin) : null,
-          budgetMax: formData.budgetMax ? parseFloat(formData.budgetMax) : null,
-        }),
-      });
+        try {
+            const response = await fetch("/api/copilot/recommend", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ...formData,
+                    budgetMin: formData.budgetMin ? parseFloat(formData.budgetMin) : null,
+                    budgetMax: formData.budgetMax ? parseFloat(formData.budgetMax) : null,
+                }),
+            });
 
-      const data = await response.json();
+            const data = await response.json();
+            if (!response.ok) {
+                setError(data.error || "Failed to generate recommendation");
+                return;
+            }
 
-      if (!response.ok) {
-        setError(data.error || "Failed to generate recommendation");
-        return;
-      }
+            setResult(data.data);
+            setShowDraft(false);
+        } catch (err: any) {
+            setError(err.message || "An error occurred");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      setResult(data.data);
-      setShowDraft(false);
-    } catch (err: any) {
-      setError(err.message || "An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
+    const handleSendEmail = async () => {
+        if (!result) return;
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await fetch("/api/copilot/recommend", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ...formData,
+                    budgetMin: formData.budgetMin ? parseFloat(formData.budgetMin) : null,
+                    budgetMax: formData.budgetMax ? parseFloat(formData.budgetMax) : null,
+                    sendEmail: true,
+                }),
+            });
 
-  const handleSendEmail = async () => {
-    if (!result) return;
+            const data = await response.json();
+            if (!response.ok) {
+                setError(data.error || "Failed to send email");
+                return;
+            }
 
-    setLoading(true);
-    setError(null);
-    try {
-      // Re-submit with sendEmail flag
-      const response = await fetch("/api/copilot/recommend", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...formData,
-          budgetMin: formData.budgetMin ? parseFloat(formData.budgetMin) : null,
-          budgetMax: formData.budgetMax ? parseFloat(formData.budgetMax) : null,
-          sendEmail: true,
-        }),
-      });
+            setResult(data.data);
+            if (!data.data?.emailSent && data.data?.emailError) {
+                setError(`Email could not be sent: ${data.data.emailError}`);
+            }
+        } catch (err: any) {
+            setError(err.message || "Failed to send email");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      const data = await response.json();
+    return (
+        <div className="h-full flex flex-col">
+            {!result ? (
+                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8">
+                    <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
 
-      if (!response.ok) {
-        setError(data.error || "Failed to send email");
-        return;
-      }
-
-      setResult(data.data);
-      // The API returns 200 even when Resend itself rejects the send.
-      // Surface the underlying provider error so failures aren't silent.
-      if (!data.data?.emailSent && data.data?.emailError) {
-        setError(`Email could not be sent: ${data.data.emailError}`);
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to send email");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="h-full flex flex-col">
-      {/* Form Section */}
-      {!result ? (
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-white mb-2">
-                Generate Product Recommendation
-              </h2>
-              <p className="text-gray-400">
-                Enter customer details and Moju will find the perfect matches
-              </p>
-            </div>
-
-            {/* Customer Info */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Customer Info</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  placeholder="Customer Name"
-                  value={formData.customerName}
-                  onChange={(e) =>
-                    handleInputChange("customerName", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
-                  required
-                />
-                <input
-                  type="email"
-                  placeholder="Customer Email"
-                  value={formData.customerEmail}
-                  onChange={(e) =>
-                    handleInputChange("customerEmail", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Product Preferences */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">
-                Product Preferences
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <select
-                  value={formData.productType}
-                  onChange={(e) =>
-                    handleInputChange("productType", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-yellow-500"
-                >
-                  <option value="">Product Type</option>
-                  <option value="engagement ring">Engagement Ring</option>
-                  <option value="wedding band">Wedding Band</option>
-                  <option value="bracelet">Bracelet</option>
-                  <option value="necklace">Necklace</option>
-                  <option value="earrings">Earrings</option>
-                  <option value="other">Other</option>
-                </select>
-
-                <select
-                  value={formData.diamondShape}
-                  onChange={(e) =>
-                    handleInputChange("diamondShape", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-yellow-500"
-                >
-                  <option value="">Diamond Shape</option>
-                  <option value="round">Round</option>
-                  <option value="oval">Oval</option>
-                  <option value="emerald">Emerald</option>
-                  <option value="cushion">Cushion</option>
-                  <option value="asscher">Asscher</option>
-                  <option value="marquise">Marquise</option>
-                  <option value="radiant">Radiant</option>
-                </select>
-
-                <select
-                  value={formData.metal}
-                  onChange={(e) => handleInputChange("metal", e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-yellow-500"
-                >
-                  <option value="">Metal Type</option>
-                  <option value="white gold">White Gold</option>
-                  <option value="yellow gold">Yellow Gold</option>
-                  <option value="rose gold">Rose Gold</option>
-                  <option value="platinum">Platinum</option>
-                </select>
-
-                <select
-                  value={formData.style}
-                  onChange={(e) => handleInputChange("style", e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-yellow-500"
-                >
-                  <option value="">Style</option>
-                  <option value="classic">Classic</option>
-                  <option value="modern">Modern</option>
-                  <option value="vintage">Vintage</option>
-                  <option value="contemporary">Contemporary</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Budget */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Budget</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="number"
-                  placeholder="Minimum (optional)"
-                  value={formData.budgetMin}
-                  onChange={(e) =>
-                    handleInputChange("budgetMin", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
-                />
-                <input
-                  type="number"
-                  placeholder="Maximum (optional)"
-                  value={formData.budgetMax}
-                  onChange={(e) =>
-                    handleInputChange("budgetMax", e.target.value)
-                  }
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
-                />
-              </div>
-            </div>
-
-            {/* Additional Info */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">
-                Additional Info
-              </h3>
-              <select
-                value={formData.timeline}
-                onChange={(e) => handleInputChange("timeline", e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-yellow-500"
-              >
-                <option value="">Purchase Timeline</option>
-                <option value="within 2 weeks">Within 2 weeks</option>
-                <option value="within 1 month">Within 1 month</option>
-                <option value="within 3 months">Within 3 months</option>
-                <option value="flexible">Flexible</option>
-              </select>
-
-              <textarea
-                placeholder="Additional notes from conversation..."
-                value={formData.notes}
-                onChange={(e) => handleInputChange("notes", e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500 h-20 resize-none"
-              />
-            </div>
-
-            {error && (
-              <div className="bg-red-900/30 border border-red-500 rounded px-4 py-3 text-red-200 flex gap-2">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <p>{error}</p>
-              </div>
-            )}
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-600 text-black font-semibold py-3 rounded flex items-center justify-center gap-2 transition"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Send className="w-5 h-5" />
-                  Generate Recommendation
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      ) : (
-        /* Results Section */
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-3xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  Recommendations for {result.customerName}
-                </h2>
-                <p className="text-gray-400 mt-1">
-                  {result.matches.length} matching products found
-                </p>
-              </div>
-              <button
-                onClick={() => setResult(null)}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
-              >
-                New Search
-              </button>
-            </div>
-
-            {/* Summary */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gray-800/50 border border-gray-700 rounded-lg p-4"
-            >
-              <h3 className="text-lg font-semibold text-white mb-2">
-                Internal Summary
-              </h3>
-              <p className="text-gray-300">{result.internalSummary}</p>
-            </motion.div>
-
-            {/* Matches */}
-            {result.matches.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-white">
-                  Top Matches
-                </h3>
-                {result.matches.slice(0, 3).map((product, idx) => (
-                  <motion.div
-                    key={product.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className="bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden hover:border-yellow-500/50 transition"
-                  >
-                    <div className="flex gap-4 p-4">
-                      {product.image_url && (
-                        <img
-                          src={product.image_url}
-                          alt={product.title}
-                          className="w-24 h-24 object-cover rounded"
-                        />
-                      )}
-                      <div className="flex-1">
-                        <h4 className="text-white font-semibold">
-                          {product.title}
-                        </h4>
-                        <p className="text-yellow-400 font-bold">
-                          ${product.price.toLocaleString()}
-                        </p>
-                        <div className="text-xs text-gray-400 mt-2 space-y-1">
-                          <p>
-                            {product.diamond_shape && `${product.diamond_shape} `}
-                            {product.metal && `${product.metal} `}
-                            {product.style && `${product.style}`}
-                          </p>
+                        {/* Hero */}
+                        <div className="space-y-3">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[10px] font-bold tracking-wider uppercase">
+                                <Wand2 className="w-3 h-3" />
+                                Recommendation Mode
+                            </div>
+                            <h2 className="text-2xl lg:text-3xl font-serif text-foreground">
+                                Generate a personalized selection
+                            </h2>
+                            <p className="text-muted text-sm">
+                                Tell the co-pilot about the customer. We&apos;ll match against live inventory and
+                                draft a customer-ready email — you review before it sends.
+                            </p>
                         </div>
-                      </div>
-                      <a
-                        href={product.shopify_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded text-sm font-semibold h-fit"
-                      >
-                        View
-                      </a>
+
+                        {/* Customer */}
+                        <FormSection label="Customer" hint="Required so we can address the email properly">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FieldWithIcon icon={<User className="w-4 h-4" />}>
+                                    <input
+                                        type="text"
+                                        placeholder="Customer name"
+                                        value={formData.customerName}
+                                        onChange={e => handleInputChange("customerName", e.target.value)}
+                                        required
+                                        className={inputCls}
+                                    />
+                                </FieldWithIcon>
+                                <FieldWithIcon icon={<Mail className="w-4 h-4" />}>
+                                    <input
+                                        type="email"
+                                        placeholder="customer@email.com"
+                                        value={formData.customerEmail}
+                                        onChange={e => handleInputChange("customerEmail", e.target.value)}
+                                        required
+                                        className={inputCls}
+                                    />
+                                </FieldWithIcon>
+                            </div>
+                        </FormSection>
+
+                        {/* Product preferences */}
+                        <FormSection label="What are they looking for?" hint="Leave fields blank if unspecified — we'll match more loosely">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <SelectField
+                                    icon={<Gem className="w-4 h-4" />}
+                                    value={formData.productType}
+                                    onChange={v => handleInputChange("productType", v)}
+                                    label="Product type"
+                                    options={PRODUCT_TYPES}
+                                />
+                                <SelectField
+                                    icon={<Diamond className="w-4 h-4" />}
+                                    value={formData.diamondShape}
+                                    onChange={v => handleInputChange("diamondShape", v)}
+                                    label="Diamond shape"
+                                    options={DIAMOND_SHAPES.map(s => ({ value: s, label: cap(s) }))}
+                                />
+                                <SelectField
+                                    icon={<Sparkles className="w-4 h-4" />}
+                                    value={formData.metal}
+                                    onChange={v => handleInputChange("metal", v)}
+                                    label="Metal type"
+                                    options={METALS}
+                                />
+                                <SelectField
+                                    icon={<Sparkles className="w-4 h-4" />}
+                                    value={formData.style}
+                                    onChange={v => handleInputChange("style", v)}
+                                    label="Style"
+                                    options={STYLES.map(s => ({ value: s, label: cap(s) }))}
+                                />
+                            </div>
+                        </FormSection>
+
+                        {/* Budget */}
+                        <FormSection label="Budget" hint="A range helps us rank the closest options first">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FieldWithIcon icon={<Wallet className="w-4 h-4" />} prefix="$">
+                                    <input
+                                        type="number"
+                                        inputMode="numeric"
+                                        placeholder="Minimum (optional)"
+                                        value={formData.budgetMin}
+                                        onChange={e => handleInputChange("budgetMin", e.target.value)}
+                                        className={`${inputCls} pl-1`}
+                                    />
+                                </FieldWithIcon>
+                                <FieldWithIcon icon={<Wallet className="w-4 h-4" />} prefix="$">
+                                    <input
+                                        type="number"
+                                        inputMode="numeric"
+                                        placeholder="Maximum (optional)"
+                                        value={formData.budgetMax}
+                                        onChange={e => handleInputChange("budgetMax", e.target.value)}
+                                        className={`${inputCls} pl-1`}
+                                    />
+                                </FieldWithIcon>
+                            </div>
+                        </FormSection>
+
+                        {/* Additional info */}
+                        <FormSection label="Additional context" hint="Optional but improves the email's tone">
+                            <div className="space-y-3">
+                                <SelectField
+                                    icon={<Calendar className="w-4 h-4" />}
+                                    value={formData.timeline}
+                                    onChange={v => handleInputChange("timeline", v)}
+                                    label="Purchase timeline"
+                                    options={TIMELINES}
+                                />
+                                <FieldWithIcon icon={<FileText className="w-4 h-4" />} alignTop>
+                                    <textarea
+                                        placeholder="Notes from the conversation — occasion, partner's style preferences, deal-breakers, anything else worth mentioning."
+                                        value={formData.notes}
+                                        onChange={e => handleInputChange("notes", e.target.value)}
+                                        rows={3}
+                                        className={`${inputCls} resize-none`}
+                                    />
+                                </FieldWithIcon>
+                            </div>
+                        </FormSection>
+
+                        {error && (
+                            <div className="bg-red-500/10 border border-red-500/40 rounded-2xl px-4 py-3 text-red-300 flex gap-2.5 items-start text-sm">
+                                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                <p className="wrap-break-word">{error}</p>
+                            </div>
+                        )}
+
+                        {/* Submit */}
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-accent text-background font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-60 disabled:scale-100 disabled:cursor-not-allowed"
+                        >
+                            {loading ? (
+                                <>
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                    Generating recommendation...
+                                </>
+                            ) : (
+                                <>
+                                    <Wand2 className="w-5 h-5" />
+                                    Generate Recommendation
+                                </>
+                            )}
+                        </button>
                     </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
+                </form>
+            ) : (
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8">
+                    <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-500">
 
-            {/* Custom Order Suggestion */}
-            {result.customOrderSuggested && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-blue-900/30 border border-blue-500 rounded-lg p-4 flex gap-3"
-              >
-                <Package className="w-5 h-5 text-blue-400 flex-shrink-0" />
-                <div>
-                  <h4 className="text-white font-semibold">
-                    No exact matches found
-                  </h4>
-                  <p className="text-gray-300 text-sm mt-1">
-                    Consider offering a custom design service to this customer.
-                    Our team can create a bespoke piece that matches their
-                    preferences perfectly.
-                  </p>
+                        {/* Header */}
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[10px] font-bold tracking-wider uppercase mb-2">
+                                    <Wand2 className="w-3 h-3" />
+                                    Selection
+                                </div>
+                                <h2 className="text-xl lg:text-2xl font-serif">
+                                    For {result.customerName}
+                                </h2>
+                                <p className="text-xs text-muted mt-1">
+                                    {result.matches.length} matching {result.matches.length === 1 ? "piece" : "pieces"} found
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setResult(null)}
+                                className="px-4 py-2 rounded-xl border border-border/50 text-muted text-sm hover:border-accent/40 hover:text-accent transition-colors shrink-0"
+                            >
+                                New search
+                            </button>
+                        </div>
+
+                        {/* Internal summary */}
+                        <Card label="Internal Summary">
+                            <p className="text-sm text-foreground/85 leading-relaxed">{result.internalSummary}</p>
+                        </Card>
+
+                        {/* Match list */}
+                        {result.matches.length > 0 && (
+                            <div className="space-y-3">
+                                <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">Top Matches</p>
+                                {result.matches.slice(0, 3).map((product, idx) => (
+                                    <motion.a
+                                        key={product.id}
+                                        href={product.shopify_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        initial={{ opacity: 0, y: 8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: idx * 0.06 }}
+                                        className="flex gap-4 p-3 lg:p-4 rounded-2xl bg-surface/20 border border-border/50 hover:border-accent/40 hover:bg-accent/5 transition-colors group"
+                                    >
+                                        {product.image_url ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img
+                                                src={product.image_url}
+                                                alt={product.title}
+                                                className="w-20 h-20 lg:w-24 lg:h-24 rounded-xl object-cover bg-surface/40 shrink-0"
+                                                onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                            />
+                                        ) : (
+                                            <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-xl bg-surface/40 flex items-center justify-center shrink-0">
+                                                <Package className="w-5 h-5 text-muted" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                            <h4 className="font-medium text-foreground text-sm leading-snug line-clamp-2 group-hover:text-accent transition-colors">{product.title}</h4>
+                                            <p className="text-accent font-serif text-base mt-1">${product.price.toLocaleString()}</p>
+                                            <p className="text-[11px] text-muted mt-0.5 truncate">
+                                                {[product.diamond_shape, product.metal, product.style].filter(Boolean).join(" · ") || "—"}
+                                            </p>
+                                        </div>
+                                        <span className="self-center hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl border border-accent/30 text-accent text-xs font-semibold group-hover:bg-accent group-hover:text-background transition-colors shrink-0">
+                                            View
+                                            <ExternalLink className="w-3 h-3" />
+                                        </span>
+                                    </motion.a>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Custom order suggestion */}
+                        {result.customOrderSuggested && (
+                            <div className="rounded-2xl bg-blue-500/5 border border-blue-500/30 px-4 py-3 flex gap-3">
+                                <Package className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                                <div className="text-sm">
+                                    <p className="font-semibold text-foreground">No exact matches found</p>
+                                    <p className="text-muted text-[13px] mt-0.5 leading-relaxed">
+                                        Consider a custom-design pitch — our team can create a bespoke piece for this customer.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Email draft */}
+                        <div className="space-y-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowDraft(!showDraft)}
+                                className="text-accent text-sm font-semibold flex items-center gap-2 hover:text-accent/80 transition-colors"
+                            >
+                                <ChevronDown className={`w-4 h-4 transition-transform ${showDraft ? "" : "-rotate-90"}`} />
+                                {showDraft ? "Hide email draft" : "View email draft"}
+                            </button>
+                            {showDraft && (
+                                <div className="rounded-2xl bg-surface/20 border border-border/50 p-4">
+                                    <pre className="text-[13px] text-foreground/85 whitespace-pre-wrap font-sans leading-relaxed">{result.emailDraft}</pre>
+                                </div>
+                            )}
+                        </div>
+
+                        {error && (
+                            <div className="bg-red-500/10 border border-red-500/40 rounded-2xl px-4 py-3 text-red-300 flex gap-2.5 items-start text-sm">
+                                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                <p className="wrap-break-word">{error}</p>
+                            </div>
+                        )}
+
+                        {/* Send actions */}
+                        {!result.emailSent ? (
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={loading || result.matches.length === 0}
+                                    className="flex-1 bg-accent text-background font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="w-5 h-5" />
+                                            Send Email to Customer
+                                        </>
+                                    )}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(result.emailDraft);
+                                        toast.success("Email draft copied to clipboard");
+                                    }}
+                                    className="px-4 py-3.5 rounded-2xl border border-border/50 text-muted hover:border-accent/40 hover:text-accent transition-colors flex items-center gap-2 text-sm font-semibold"
+                                >
+                                    <CopyIcon className="w-4 h-4" />
+                                    Copy
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="rounded-2xl bg-green-500/10 border border-green-500/40 px-4 py-4 text-green-300 text-center font-semibold flex items-center justify-center gap-2">
+                                <CheckCircle2 className="w-5 h-5" />
+                                Email sent to {result.customerName}
+                            </div>
+                        )}
+                    </div>
                 </div>
-              </motion.div>
             )}
-
-            {/* Email Draft */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-3"
-            >
-              <button
-                onClick={() => setShowDraft(!showDraft)}
-                className="text-yellow-400 hover:text-yellow-300 font-semibold flex items-center gap-2"
-              >
-                {showDraft ? "▼" : "▶"} View Email Draft
-              </button>
-
-              {showDraft && (
-                <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                  <div className="bg-gray-900 rounded p-4 text-gray-300 whitespace-pre-wrap text-sm font-mono">
-                    {result.emailDraft}
-                  </div>
-                </div>
-              )}
-            </motion.div>
-
-            {error && (
-              <div className="bg-red-900/30 border border-red-500 rounded px-4 py-3 text-red-200 flex gap-2">
-                <AlertCircle className="w-5 h-5 shrink-0" />
-                <p className="wrap-break-word">{error}</p>
-              </div>
-            )}
-
-            {/* Send Email */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex gap-4"
-            >
-              {!result.emailSent ? (
-                <>
-                  <button
-                    onClick={handleSendEmail}
-                    disabled={loading || result.matches.length === 0}
-                    className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-600 text-black font-semibold py-3 rounded flex items-center justify-center gap-2 transition"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-5 h-5" />
-                        Send Email to Customer
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(result.emailDraft);
-                      toast.success("Email draft copied to clipboard");
-                    }}
-                    className="px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded font-semibold"
-                  >
-                    Copy Draft
-                  </button>
-                </>
-              ) : (
-                <div className="w-full bg-green-900/30 border border-green-500 rounded px-4 py-3 text-green-200 text-center font-semibold">
-                  ✓ Email sent successfully!
-                </div>
-              )}
-            </motion.div>
-          </div>
         </div>
-      )}
-    </div>
-  );
+    );
+}
+
+// ── Reusable form bits ────────────────────────────────────────────────────────
+
+const inputCls = "w-full bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted/50 py-1";
+
+function FormSection({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+    return (
+        <div className="space-y-3">
+            <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">{label}</p>
+                {hint && <p className="text-[11px] text-muted/60 mt-0.5">{hint}</p>}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function FieldWithIcon({
+    icon, prefix, alignTop, children,
+}: { icon: React.ReactNode; prefix?: string; alignTop?: boolean; children: React.ReactNode }) {
+    return (
+        <div className={`flex ${alignTop ? "items-start" : "items-center"} gap-2.5 px-3 py-2.5 bg-surface/20 border border-border/50 rounded-xl focus-within:border-accent/50 focus-within:bg-surface/30 transition-colors`}>
+            <span className={`text-muted/60 ${alignTop ? "mt-1" : ""}`}>{icon}</span>
+            {prefix && <span className="text-muted/80 text-sm select-none">{prefix}</span>}
+            <div className="flex-1 min-w-0">{children}</div>
+        </div>
+    );
+}
+
+function SelectField({
+    icon, value, onChange, label, options,
+}: {
+    icon: React.ReactNode;
+    value: string;
+    onChange: (v: string) => void;
+    label: string;
+    options: { value: string; label: string }[];
+}) {
+    return (
+        <div className="relative flex items-center gap-2.5 px-3 py-2.5 bg-surface/20 border border-border/50 rounded-xl focus-within:border-accent/50 focus-within:bg-surface/30 transition-colors">
+            <span className="text-muted/60">{icon}</span>
+            <select
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                className="appearance-none bg-transparent border-none focus:outline-none text-sm text-foreground flex-1 pr-6 cursor-pointer"
+            >
+                <option value="">{label}</option>
+                {options.map(opt => (
+                    <option key={opt.value} value={opt.value} className="bg-background">{opt.label}</option>
+                ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-muted/50 pointer-events-none absolute right-3" />
+        </div>
+    );
+}
+
+function Card({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl bg-surface/20 border border-border/50 p-4 lg:p-5 space-y-2"
+        >
+            <p className="text-[10px] uppercase tracking-widest text-muted/70 font-bold">{label}</p>
+            {children}
+        </motion.div>
+    );
+}
+
+function cap(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1);
 }
