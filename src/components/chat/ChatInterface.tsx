@@ -1118,40 +1118,43 @@ export default function ChatInterface() {
             <main className="flex-1 flex flex-col relative min-w-0">
 
                 {/* Header */}
-                <header className="h-16 lg:h-20 border-b border-border flex items-center justify-between px-4 lg:px-8 bg-background/50 backdrop-blur-md z-30 shrink-0">
-                    <div className="flex items-center gap-2 lg:gap-4">
+                <header className="h-16 lg:h-20 border-b border-border flex items-center justify-between gap-2 px-3 lg:px-8 bg-background/50 backdrop-blur-md z-30 shrink-0">
+                    <div className="flex items-center gap-2 lg:gap-4 min-w-0">
                         {/* Mobile hamburger */}
                         <button onClick={() => setSidebarOpen(true)} title="Open menu"
-                            className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all lg:hidden">
+                            className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all lg:hidden shrink-0">
                             <Menu className="w-5 h-5" />
                         </button>
                         {/* Desktop expand (when collapsed) */}
                         {!sidebarOpen && (
                             <button onClick={() => setSidebarOpen(true)} title="Open sidebar"
-                                className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all hidden lg:flex">
+                                className="p-2 rounded-xl hover:bg-surface/60 text-muted hover:text-foreground transition-all hidden lg:flex shrink-0">
                                 <ChevronRight className="w-4 h-4" />
                             </button>
                         )}
-                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
+                        {/* Title block — hidden on small screens to save horizontal room for toggles. */}
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-accent/10 border border-accent/20 hidden sm:flex items-center justify-center text-accent shrink-0">
                             <Sparkles className="w-4 h-4 lg:w-5 lg:h-5" />
                         </div>
-                        <div>
-                            <h2 className="font-serif text-base lg:text-lg leading-none">AI Co-Pilot</h2>
-                            <span className="text-[9px] lg:text-[10px] text-green-400 font-bold uppercase tracking-tighter">Verified Logic Operational</span>
+                        <div className="hidden sm:block min-w-0">
+                            <h2 className="font-serif text-base lg:text-lg leading-none whitespace-nowrap">AI Co-Pilot</h2>
+                            <span className="hidden md:inline-block text-[9px] lg:text-[10px] text-green-400 font-bold uppercase tracking-tighter whitespace-nowrap mt-0.5">Verified Logic Operational</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2 lg:gap-3">
-                        {/* Copilot Mode Selector */}
+                    <div className="flex items-center gap-1.5 lg:gap-3 shrink-0">
+                        {/* Copilot Mode Selector — labels hide on phones, icons only there. */}
                         <div className="flex bg-surface rounded-full p-1 border border-border/50">
                             <button onClick={() => setCopilotMode("questions")}
-                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'questions' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
-                                <MessageSquare className="w-3 h-3" />
-                                Questions
+                                title="Questions mode"
+                                className={`px-2.5 sm:px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'questions' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                <MessageSquare className="w-3 h-3 shrink-0" />
+                                <span className="hidden sm:inline">Questions</span>
                             </button>
                             <button onClick={() => setCopilotMode("recommendations")}
-                                className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'recommendations' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
-                                <Wand2 className="w-3 h-3" />
-                                Recommend
+                                title="Recommendation mode"
+                                className={`px-2.5 sm:px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1 ${copilotMode === 'recommendations' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                <Wand2 className="w-3 h-3 shrink-0" />
+                                <span className="hidden sm:inline">Recommend</span>
                             </button>
                         </div>
 
@@ -1159,11 +1162,11 @@ export default function ChatInterface() {
                         {copilotMode === "questions" && (
                             <div className="flex bg-surface rounded-full p-1 border border-border/50">
                                 <button onClick={() => setMode("short")}
-                                    className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                    className={`px-2.5 sm:px-3 lg:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold transition-all ${mode === 'short' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
                                     Short
                                 </button>
                                 <button onClick={() => setMode("detailed")}
-                                    className={`px-3 lg:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
+                                    className={`px-2.5 sm:px-3 lg:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold transition-all ${mode === 'detailed' ? 'bg-accent text-background' : 'text-muted hover:text-foreground'}`}>
                                     Detailed
                                 </button>
                             </div>
