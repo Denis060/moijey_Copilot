@@ -77,16 +77,19 @@ export const emailService = {
    * Send recommendation email to customer with product cards (image, title, price,
    * "View on Moijey Diamonds" button per product). The body text is the AI-generated
    * narrative; cards reinforce by linking each piece directly to its Shopify page.
+   *
+   * Optional subjectOverride lets the rep customize the subject line per send.
    */
   async sendRecommendationEmail(
     customerEmail: string,
     customerName: string,
     emailBody: string,
-    products: CustomerEmailProduct[] = []
+    products: CustomerEmailProduct[] = [],
+    subjectOverride?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       const resend = getResendClient();
-      const subject = `Your Personalized Jewelry Recommendations from Moijey`;
+      const subject = subjectOverride?.trim() || `Your Personalized Jewelry Recommendations from Moijey`;
 
       const bodyParagraphs = emailBody
         .split(/\n+/)

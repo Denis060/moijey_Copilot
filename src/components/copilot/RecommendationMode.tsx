@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import {
     Send, Loader2, Package, AlertCircle, User, Mail,
     Gem, Diamond, Sparkles, Wallet, Calendar, FileText,
     Wand2, ChevronDown, CheckCircle2, ExternalLink, Copy as CopyIcon,
+    Tag, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -40,6 +42,7 @@ interface RecommendationResult {
     internalSummary: string;
     emailDraft: string;
     emailSent: boolean;
+    testEmailSent?: boolean;
     emailError?: string | null;
     customOrderSuggested: boolean;
 }
@@ -77,6 +80,7 @@ const TIMELINES = [
 ];
 
 export default function RecommendationMode() {
+    const { data: session } = useSession();
     const [formData, setFormData] = useState<RecommendationFormData>({
         customerName: "",
         customerEmail: "",
@@ -92,12 +96,14 @@ export default function RecommendationMode() {
     });
 
     const [loading, setLoading] = useState(false);
+    const [testLoading, setTestLoading] = useState(false);
     const [result, setResult] = useState<RecommendationResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [showDraft, setShowDraft] = useState(false);
-    // Rep edits applied at send time. Both default to "use what the AI suggested" until
+    // Rep edits applied at send time. All default to "use what the AI suggested" until
     // the rep touches them.
     const [editedDraft, setEditedDraft] = useState<string | null>(null);
+    const [editedSubject, setEditedSubject] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     const handleInputChange = (field: keyof RecommendationFormData, value: any) => {
@@ -108,6 +114,16 @@ export default function RecommendationMode() {
         e.preventDefault();
         setLoading(true);
         setError(null);
+
+        // Cheap client-side guard so the rep gets immediate feedback instead of waiting
+        // for the server to bounce them back.
+        const minN = formData.budgetMin ? parseFloat(formData.budgetMin) : NaN;
+        const maxN = formData.budgetMax ? parseFloat(formData.budgetMax) : NaN;
+        if (Number.isFinite(minN) && Number.isFinite(maxN) && minN > maxN) {
+            toast.error("Budget range invalid", { description: "Minimum can't be greater than maximum." });
+            setLoading(false);
+            return;
+        }
 
         try {
             const response = await fetch("/api/copilot/recommend", {
@@ -130,6 +146,7 @@ export default function RecommendationMode() {
             setShowDraft(false);
             // Reset rep-edit state for the new result so we don't leak edits across runs.
             setEditedDraft(null);
+            setEditedSubject("");
             // Default selection = top 3 matches (matches the email-builder default).
             const top3 = (data.data?.matches ?? []).slice(0, 3).map((m: Match) => m.id);
             setSelectedIds(new Set(top3));
@@ -140,10 +157,16 @@ export default function RecommendationMode() {
         }
     };
 
-    const handleSendEmail = async () => {
+    /**
+     * Send the email. When `mode === "test"` we route the email to the rep's own inbox
+     * (the server reads session.user.email) so they can preview before sending for real.
+     * Test sends do NOT mark email_sent on the recommendation row.
+     */
+    const sendCustomerEmail = async (mode: "real" | "test", testRecipient?: string) => {
         if (!result) return;
-        setLoading(true);
+        if (mode === "real") setLoading(true); else setTestLoading(true);
         setError(null);
+
         try {
             const response = await fetch("/api/copilot/recommend", {
                 method: "POST",
@@ -153,10 +176,10 @@ export default function RecommendationMode() {
                     budgetMin: formData.budgetMin ? parseFloat(formData.budgetMin) : null,
                     budgetMax: formData.budgetMax ? parseFloat(formData.budgetMax) : null,
                     sendEmail: true,
-                    // Pass rep edits if any. If editedDraft is null we let the server use the
-                    // freshly-generated draft; same for selectedIds and the top-3 default.
                     emailDraftOverride: editedDraft ?? result.emailDraft,
                     selectedProductIds: Array.from(selectedIds),
+                    subjectOverride: editedSubject.trim() || undefined,
+                    testRecipient: mode === "test" ? testRecipient : undefined,
                 }),
             });
 
@@ -166,15 +189,36 @@ export default function RecommendationMode() {
                 return;
             }
 
-            setResult(data.data);
-            if (!data.data?.emailSent && data.data?.emailError) {
-                setError(`Email could not be sent: ${data.data.emailError}`);
+            // For real sends, swap in the new result so the success state appears.
+            // For test sends, keep the current result (don't flip emailSent), just toast.
+            if (mode === "real") {
+                setResult(data.data);
+                if (!data.data?.emailSent && data.data?.emailError) {
+                    setError(`Email could not be sent: ${data.data.emailError}`);
+                }
+            } else {
+                if (data.data?.testEmailSent) {
+                    toast.success("Test email sent", {
+                        description: `Check ${testRecipient}. The customer will see exactly that.`,
+                    });
+                } else if (data.data?.emailError) {
+                    setError(`Test could not be sent: ${data.data.emailError}`);
+                }
             }
         } catch (err: any) {
             setError(err.message || "Failed to send email");
         } finally {
-            setLoading(false);
+            if (mode === "real") setLoading(false); else setTestLoading(false);
         }
+    };
+
+    const handleSendEmail = () => sendCustomerEmail("real");
+    const handleSendTest = () => {
+        if (!session?.user?.email) {
+            toast.error("Can't send test", { description: "Your session email isn't available." });
+            return;
+        }
+        sendCustomerEmail("test", session.user.email);
     };
 
     /** Toggle whether a product is included in the email cards. */
@@ -216,12 +260,15 @@ export default function RecommendationMode() {
                         </div>
 
                         {/* Customer */}
-                        <FormSection label="Customer" hint="Required so we can address the email properly">
+                        <FormSection
+                            label={<>Customer <RequiredMark /></>}
+                            hint="Required so we can address the email properly"
+                        >
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <FieldWithIcon icon={<User className="w-4 h-4" />}>
                                     <input
                                         type="text"
-                                        placeholder="Customer name"
+                                        placeholder="Customer name *"
                                         value={formData.customerName}
                                         onChange={e => handleInputChange("customerName", e.target.value)}
                                         required
@@ -231,7 +278,7 @@ export default function RecommendationMode() {
                                 <FieldWithIcon icon={<Mail className="w-4 h-4" />}>
                                     <input
                                         type="email"
-                                        placeholder="customer@email.com"
+                                        placeholder="customer@email.com *"
                                         value={formData.customerEmail}
                                         onChange={e => handleInputChange("customerEmail", e.target.value)}
                                         required
@@ -469,9 +516,8 @@ export default function RecommendationMode() {
                             </div>
                         )}
 
-                        {/* Email draft — editable. Rep can tweak the body before sending,
-                            or leave the AI's draft untouched. The textarea controls editedDraft;
-                            send-time falls back to the original draft if rep hasn't edited. */}
+                        {/* Email subject + draft — both editable. Rep can tweak before
+                            sending; send-time falls back to AI defaults if rep hasn't touched them. */}
                         <div className="space-y-2">
                             <div className="flex items-center justify-between gap-3">
                                 <button
@@ -482,19 +528,31 @@ export default function RecommendationMode() {
                                     <ChevronDown className={`w-4 h-4 transition-transform ${showDraft ? "" : "-rotate-90"}`} />
                                     {showDraft ? "Hide email draft" : "View / edit email draft"}
                                 </button>
-                                {showDraft && editedDraft !== null && editedDraft !== result.emailDraft && (
+                                {showDraft && (
+                                    (editedDraft !== null && editedDraft !== result.emailDraft) || editedSubject.trim().length > 0
+                                ) && (
                                     <button
                                         type="button"
-                                        onClick={() => setEditedDraft(null)}
+                                        onClick={() => { setEditedDraft(null); setEditedSubject(""); }}
                                         className="text-[11px] text-muted hover:text-accent underline underline-offset-2"
-                                        title="Discard your edits and use the AI's original draft"
+                                        title="Discard your edits and use the AI's original draft + default subject"
                                     >
                                         Reset to original
                                     </button>
                                 )}
                             </div>
                             {showDraft && (
-                                <div className="rounded-2xl bg-surface/20 border border-border/50 p-3 space-y-2">
+                                <div className="rounded-2xl bg-surface/20 border border-border/50 p-3 space-y-3">
+                                    <div className="flex items-center gap-2.5 px-3 py-2.5 bg-background/40 border border-border/40 rounded-xl focus-within:border-accent/50 transition-colors">
+                                        <Tag className="w-4 h-4 text-muted/60 shrink-0" />
+                                        <input
+                                            type="text"
+                                            value={editedSubject}
+                                            onChange={e => setEditedSubject(e.target.value)}
+                                            placeholder="Your Personalized Jewelry Recommendations from Moijey"
+                                            className="w-full bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted/50"
+                                        />
+                                    </div>
                                     <textarea
                                         value={editedDraft ?? result.emailDraft}
                                         onChange={e => setEditedDraft(e.target.value)}
@@ -517,10 +575,10 @@ export default function RecommendationMode() {
 
                         {/* Send actions */}
                         {!result.emailSent ? (
-                            <div className="flex gap-3">
+                            <div className="flex flex-col sm:flex-row gap-3">
                                 <button
                                     onClick={handleSendEmail}
-                                    disabled={loading || selectedIds.size === 0}
+                                    disabled={loading || testLoading || selectedIds.size === 0}
                                     title={selectedIds.size === 0 ? "Select at least one product to send" : ""}
                                     className="flex-1 bg-accent text-background font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
                                 >
@@ -537,6 +595,26 @@ export default function RecommendationMode() {
                                                 : selectedIds.size > 1
                                                     ? `Send Email (${selectedIds.size} pieces)`
                                                     : "Send Email to Customer"}
+                                        </>
+                                    )}
+                                </button>
+                                {/* Sends to the rep's own inbox first as a preview. Doesn't mark
+                                    the recommendation as sent. Andy: review-before-send safety net. */}
+                                <button
+                                    onClick={handleSendTest}
+                                    disabled={loading || testLoading || selectedIds.size === 0}
+                                    title="Send a copy to your own email so you can review what the customer will see"
+                                    className="px-4 py-3.5 rounded-2xl border border-border/50 text-muted hover:border-accent/40 hover:text-accent transition-colors flex items-center justify-center gap-2 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {testLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Testing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Eye className="w-4 h-4" />
+                                            Test → me
                                         </>
                                     )}
                                 </button>
@@ -568,7 +646,11 @@ export default function RecommendationMode() {
 
 const inputCls = "w-full bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted/50 py-1";
 
-function FormSection({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function RequiredMark() {
+    return <span className="text-red-400/80 ml-0.5" aria-label="required">*</span>;
+}
+
+function FormSection({ label, hint, children }: { label: React.ReactNode; hint?: string; children: React.ReactNode }) {
     return (
         <div className="space-y-3">
             <div>

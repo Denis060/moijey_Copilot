@@ -63,6 +63,8 @@ export async function POST(req: Request) {
       // Optional overrides supplied by the rep at send time:
       emailDraftOverride,        // string — final email body the rep edited locally
       selectedProductIds,        // string[] — subset of match IDs to include in the email
+      subjectOverride,           // string — rep's custom subject line
+      testRecipient,             // string — when present, send to this address instead of customerEmail and don't mark as sent
     } = body as {
       customerName: string;
       customerEmail: string;
@@ -77,6 +79,8 @@ export async function POST(req: Request) {
       sendEmail?: boolean;
       emailDraftOverride?: string;
       selectedProductIds?: string[];
+      subjectOverride?: string;
+      testRecipient?: string;
     };
 
     // Validate required fields
@@ -93,12 +97,23 @@ export async function POST(req: Request) {
       const n = typeof v === "number" ? v : parseFloat(v);
       return Number.isFinite(n) ? n : undefined;
     };
+    const budgetMinN = toNum(budgetMin);
+    const budgetMaxN = toNum(budgetMax);
+
+    // Reject obviously-wrong budget ranges before they silently return zero matches.
+    if (budgetMinN !== undefined && budgetMaxN !== undefined && budgetMinN > budgetMaxN) {
+      return Response.json(
+        { error: "Minimum budget can't be greater than maximum budget. Please correct and retry." },
+        { status: 400 }
+      );
+    }
+
     const recInput = {
       customerName,
       customerEmail,
       productType,
-      budgetMin: toNum(budgetMin),
-      budgetMax: toNum(budgetMax),
+      budgetMin: budgetMinN,
+      budgetMax: budgetMaxN,
       diamondShape,
       metal,
       style,
@@ -118,10 +133,14 @@ export async function POST(req: Request) {
 
     let emailSent = false;
     let emailError = null;
+    let testEmailSent = false;
 
     // Honor rep edits at send time:
     //   - emailDraftOverride: rep tweaked the draft locally; send their version verbatim
     //   - selectedProductIds: rep curated which matches go in the email cards
+    //   - subjectOverride: rep customized the subject line
+    //   - testRecipient: send to the rep's own inbox first instead of the customer
+    //                    (doesn't flip email_sent in the DB; this is just a preview)
     // Falls back to the freshly-generated draft + top-3 matches when no overrides given.
     const finalProducts = (Array.isArray(selectedProductIds) && selectedProductIds.length > 0)
       ? matches.filter(m => selectedProductIds.includes(m.id))
@@ -129,16 +148,23 @@ export async function POST(req: Request) {
     const finalDraft = (typeof emailDraftOverride === "string" && emailDraftOverride.trim().length > 0)
       ? emailDraftOverride
       : emailDraft;
+    const isTest = typeof testRecipient === "string" && testRecipient.trim().length > 0;
+    const recipient = isTest ? testRecipient!.trim() : customerEmail;
 
     if (sendEmail && finalProducts.length > 0) {
       const emailResult = await emailService.sendRecommendationEmail(
-        customerEmail,
+        recipient,
         customerName,
         finalDraft,
-        finalProducts
+        finalProducts,
+        subjectOverride
       );
 
-      emailSent = emailResult.success;
+      if (isTest) {
+        testEmailSent = emailResult.success;
+      } else {
+        emailSent = emailResult.success;
+      }
       if (!emailResult.success) {
         emailError = emailResult.error;
       }
@@ -180,6 +206,7 @@ export async function POST(req: Request) {
         emailDraft,
         emailSent,
         emailError,
+        testEmailSent,
         customOrderSuggested: matches.length === 0,
       },
     });
