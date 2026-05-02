@@ -825,12 +825,17 @@ export default function ChatInterface() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ vote: next }),
             });
-            if (!res.ok) throw new Error("Feedback save failed");
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error((data as any).error || `Server returned ${res.status}`);
+            }
         } catch (err: any) {
             console.error("Feedback failed:", err);
             // Roll back the optimistic update so the UI stays honest.
             setMessages(prev => prev.map((m, i) => i === idx ? { ...m, feedback: previous } : m));
-            toast.error("Couldn't record feedback", { description: "Please try again." });
+            toast.error("Couldn't record feedback", {
+                description: err?.message || "Please try again.",
+            });
         }
     };
 
