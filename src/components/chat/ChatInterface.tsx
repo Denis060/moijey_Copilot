@@ -1199,7 +1199,7 @@ export default function ChatInterface() {
                             <div className="grid grid-cols-2 gap-2 lg:gap-3 w-full">
                                 {quickFaqs.map(faq => (
                                     <button key={faq} onClick={() => setQuery(faq)}
-                                        className="p-3 lg:p-4 rounded-2xl border border-border/50 bg-surface/10 hover:border-accent/30 hover:bg-accent/5 text-[10px] text-left transition-all group">
+                                        className="p-3 lg:p-4 rounded-2xl border border-border/50 bg-surface/10 hover:border-accent/30 hover:bg-accent/5 text-xs lg:text-sm font-medium text-left transition-all group">
                                         <span className="text-muted group-hover:text-foreground">{faq}</span>
                                     </button>
                                 ))}
